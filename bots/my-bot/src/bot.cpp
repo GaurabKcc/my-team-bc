@@ -1,6 +1,7 @@
 // Minimal winning bot: gaurab's 9-0 logic + Monster->Home emblems + ward-first
 #include <cambc.h>
 #include "bot.h"
+#include <algorithm>
 #include <array>
 #include <iostream>
 #include "random.h"
@@ -154,7 +155,138 @@ bool under_threat() {
     return false;
 }
 
-void farm_camps(bool engage_shooter) {
+// Worth walking to unless we can see it respawning. Groups out of vision are
+// assumed alive; walking over is how we find out.
+bool group_farmable(const cambc::map::camp_group& group, const cambc::bitboard& visible) {
+    if ((group.spawn_tiles() & visible).is_empty())
+        return true;
+    try {
+        return !std::holds_alternative<cambc::map::camp_group_respawning>(group.state());
+    } catch (...) {
+        return true;
+    }
+}
+
+// Elk and Monolith hit for 60 and 200 a turn. Committing to the nearest group
+// regardless of weight walked us into them and stayed there: 40 camp deaths on
+// rows. Only take a heavy group when no light one is left to farm.
+bool group_is_heavy(const cambc::map::camp_group& group) {
+    for (const auto& camp : group.camps())
+        if (camp.is_elk() || camp.is_monolith())
+            return true;
+    return false;
+}
+
+} // namespace
+
+cambc::bitboard Bot::farm_goal(bool& committed) {
+    const auto visible = cambc::vision::visible_tiles();
+    const auto& groups = cambc::map::camp_groups();
+
+    // Keep hunting the committed group while it stays farmable.
+    if (committed) {
+        for (const auto& group : groups) {
+            if (group.spawn_tiles() != farm_target)
+                continue;
+            if (!group_farmable(group, visible))
+                break;
+            return farm_target;
+        }
+        committed = false;
+        farm_target.clear();
+    }
+
+    // Otherwise commit to the nearest farmable group. Distance dominates
+    // because travel is what actually limits clears; gem value only breaks
+    // ties. Light groups are tried first so we never lock onto an Elk or
+    // Monolith group while softer camps are available.
+    const auto me = cambc::self().position();
+    const cambc::map::camp_group* best = nullptr;
+    long best_key = 0;
+    for (int pass = 0; pass < 2 && best == nullptr; ++pass) {
+        for (const auto& group : groups) {
+            if (!group_farmable(group, visible))
+                continue;
+            if (pass == 0 && group_is_heavy(group))
+                continue;
+            int dist = 1 << 20;
+            for (auto tile : group.spawn_tiles().positions())
+                dist = std::min(dist, distance(me, tile));
+            const long key = static_cast<long>(dist) * 100
+                - static_cast<long>(group.gem_value());
+            if (best == nullptr || key < best_key) {
+                best = &group;
+                best_key = key;
+            }
+        }
+    }
+    if (best == nullptr) {
+        farm_target.clear();
+        return farm_target;
+    }
+    farm_target = best->spawn_tiles();
+    committed = true;
+    return farm_target;
+}
+
+void Bot::submit_if_at_altar() {
+    auto& me = cambc::self();
+    for (auto altar : cambc::map::altars().positions()) {
+        if (distance(me.position(), altar) > cambc::constants::submit_gems_range)
+            continue;
+        if (cambc::vision::has_altar_lock(altar))
+            continue;
+        try {
+            me.submit_gems(altar);
+        } catch (...) {
+        }
+        return;
+    }
+}
+
+// Commit to one unlocked altar and walk to it. Re-picking every turn made a
+// courier pace between two equidistant altars and never bank anything.
+cambc::bitboard Bot::bank_goal(bool& committed) {
+    const auto me = cambc::self().position();
+
+    if (committed) {
+        for (auto altar : cambc::map::altars().positions()) {
+            if (!bank_target.is_set(altar))
+                continue;
+            if (cambc::vision::has_altar_lock(altar))
+                break;
+            return tiles_around(altar, cambc::constants::submit_gems_range);
+        }
+        committed = false;
+        bank_target.clear();
+    }
+
+    const auto blocked = blocked_tiles();
+    vec2 best_altar{0, 0};
+    int best_dist = 1 << 20;
+    for (auto altar : cambc::map::altars().positions()) {
+        if (cambc::vision::has_altar_lock(altar))
+            continue;
+        const int d = distance(me, altar);
+        if (d < best_dist) {
+            best_dist = d;
+            best_altar = altar;
+        }
+    }
+    if (best_dist == 1 << 20) {
+        bank_target.clear();
+        return bank_target;
+    }
+
+    bank_target.clear();
+    bank_target.set(best_altar);
+    committed = true;
+    auto goals = tiles_around(best_altar, cambc::constants::submit_gems_range);
+    goals &= ~blocked | blocked;
+    return goals;
+}
+
+void Bot::farm_camps(bool engage_shooter) {
     cast_offensive_ability();
 
     if (attack_camps())
@@ -171,13 +303,11 @@ void farm_camps(bool engage_shooter) {
     }
 
     if (goals.is_empty()) {
-        const auto visible = cambc::vision::visible_tiles();
-        for (const auto& group : cambc::map::camp_groups()) {
-            const bool group_visible = !(group.spawn_tiles() & visible).is_empty();
-            if (group_visible && std::holds_alternative<cambc::map::camp_group_respawning>(group.state()))
-                continue;
-            goals |= group.spawn_tiles();
-        }
+        bool committed = !farm_target.is_empty();
+        goals = farm_goal(committed);
+        // Nothing worth walking to: hold position rather than pace.
+        if (goals.is_empty())
+            return;
     }
 
     // Re-check camps after moving, but never cast there: "excludes walking"
@@ -185,8 +315,6 @@ void farm_camps(bool engage_shooter) {
     if (move_towards_closest(goals))
         attack_camps();
 }
-
-} // namespace
 
 void Bot::play_turn() {
     // Initialise build: power shards of strength scale our basic attacks.
@@ -252,19 +380,15 @@ void Bot::play_turn() {
 
     // Bank any carried gems before farming.
     if (me.gem_count() > 0) {
-        cambc::bitboard goals;
-        goals.clear();
-        for (auto altar : cambc::map::altars().positions()) {
-            if (distance(me.position(), altar) <= cambc::constants::submit_gems_range
-                && !cambc::vision::has_altar_lock(altar)) {
-                me.submit_gems(altar);
-                return;
-            }
-            if (!cambc::vision::has_altar_lock(altar)) goals |= tiles_around(altar, cambc::constants::submit_gems_range);
+        bool committed = !bank_target.is_empty();
+        const auto goals = bank_goal(committed);
+        if (!goals.is_empty()) {
+            if (move_towards_closest(goals))
+                submit_if_at_altar();
         }
-        move_towards_closest(goals);
         return;
     }
+    bank_target.clear();
 
     // Only chase a distant shooter when already hurt enough to matter.
     farm_camps(false);

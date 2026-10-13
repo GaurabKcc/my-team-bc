@@ -264,3 +264,31 @@ plus 50 gold, so survival converts directly into score.
   distance check. Kept only the two changes that measured clean.
 - Decision: KEEP both fixes. Skipped the redundant brawl-gating and defensive
   -ability-restructure experiments (the survival block returns before brawl).
+
+## 2026-10-15 — target commitment (anti-oscillation + banking fix)
+
+Triggers: (a) user reported champions pacing back and forth with no target;
+(b) platform CSV (Downloads/match-analytics (1).csv, we = A) showed the loss
+shape: 154 gems vs 484 on IDENTICAL captures (20 vs 20) - 7.7 gems/capture
+vs 24.2. Carried gems never cleared: 22 at round 25, 80 by round 225, 102 at
+round 300. Submitted gems froze at 132 for 125 rounds. Opponent had 5 wards,
+we had 0.
+
+- Root cause: both farming and banking built a goal set as the UNION of every
+  group / altar each turn, then stepped toward whichever neighbour strictly
+  reduced distance. A champion standing between two near-equidistant camps
+  (or altars) flips sides every turn as occupancy changes. Couriers never
+  reached an altar, so bags sat unbanked.
+- Fix: commit to one target and hold it across turns. `farm_target` (spawn
+  tiles of the chosen camp group) and `bank_target` (chosen altar); both
+  re-picked only when the target dies, respawns, or gets locked.
+- Regression found and fixed: committing to the NEAREST group walked
+  champions into Elk/Monolith groups and held them there - rows fell to
+  66 gems / 40 deaths, monolith to 498. Committing concentrates where
+  union-goals had spread. Fix: two-pass selection, light groups only on
+  pass 0, heavy only when no light group remains (same shape as the earlier
+  elkring deadlock fix). rows 66 -> 1056, monolith 498 -> 1034.
+- Result: RIGHT. 8W-1L across all 9 maps, 5 total deaths (10 before).
+  Gem scores up across the board (interlock gold 1390 -> 2010-3620).
+  Corners is now the only loss (882-1038), previously a 1006-150 win.
+- Decision: KEEP. Corners regression logged OPEN.
