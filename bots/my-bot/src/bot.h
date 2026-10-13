@@ -1,13 +1,16 @@
 #pragma once
 
-// Per-champion state survives between turns. Pick one stat and keep buying it.
+// Rush-tribute: bank small gem batches fast; solo-hold captures; melee clears.
 class Bot {
-    int chosen_stat = -1;
+    bool initialised = false;
+    bool is_melee = false;
+    bool is_gold_farmer = false;
+    int primary_buys = 0;
 
-    // Spend only on power shards of the randomly chosen stat.
+    void init_once();
     void buy_items();
+    void maybe_ward();
 
 public:
-    // Priorities: shop and recall, attack enemies in range, bank gems, then farm.
     void play_turn();
 };

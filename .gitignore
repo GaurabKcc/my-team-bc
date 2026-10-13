@@ -5,3 +5,9 @@ compile_commands.json
 sdk/
 cmake/
 Desktop/
+.clangd
+bots/*/.cambc/
+matches/
+bots/*/build/
+bots/*/target/
+*.pdf
