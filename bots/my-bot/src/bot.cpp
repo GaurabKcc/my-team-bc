@@ -277,8 +277,30 @@ bool Bot::should_help() {
         return false;
     if (!cambc::vision::camps().empty())
         return false;
-    const int d = distance(me.position(), vec2{sig.x, sig.y});
-    return d <= 6;
+
+    const vec2 mate{sig.x, sig.y};
+    if (distance(me.position(), mate) > 6)
+        return false;
+
+    // Only the CLOSEST ally answers a ping. Answering together sent all six
+    // champions into one fight: in the ladder match our living-champion count
+    // swung between 6 and 0 and we were wiped completely at round 600.
+    const int mine = distance(me.position(), mate);
+    for (const auto& ally : cambc::vision::champions(team::ally)) {
+        if (ally.position().x == me.position().x
+            && ally.position().y == me.position().y)
+            continue;
+        if (!ally.is_visible() || !ally.is_alive())
+            continue;
+        const int theirs = distance(ally.position(), mate);
+        if (theirs < mine)
+            return false;
+        if (theirs == mine
+            && static_cast<int>(ally.champion_name())
+                < static_cast<int>(me.champion_name()))
+            return false;
+    }
+    return true;
 }
 
 
@@ -605,16 +627,8 @@ void Bot::play_turn() {
     if (me.health() < me.max_health() * 0.6f)
         cast_defensive_ability();
 
-    // Brawl: swing at an adjacent enemy and cash an attack-reset for a second swing.
-    for (const auto& enemy : cambc::vision::champions(team::enemy))
-        if (attack_if_in_range(enemy)) {
-            if (use_attack_reset())
-                for (const auto& again : cambc::vision::champions(team::enemy))
-                    if (attack_if_in_range(again)) break;
-            return;
-        }
-
-    // Bank any carried gems before farming.
+    // Bank any carried gems before farming. Carried gems score nothing, so
+    // this must come before anything that would walk us somewhere else.
     if (me.gem_count() > 0) {
         bool committed = !bank_target.is_empty();
         const auto goals = bank_goal(committed);
@@ -626,7 +640,14 @@ void Bot::play_turn() {
     }
     bank_target.clear();
 
-    // Only chase a distant shooter when already hurt enough to matter.
+    // Brawl: swing at an adjacent enemy and cash attack-reset for second swing.
+    for (const auto& enemy : cambc::vision::champions(team::enemy))
+        if (attack_if_in_range(enemy)) {
+            if (use_attack_reset())
+                for (const auto& again : cambc::vision::champions(team::enemy))
+                    if (attack_if_in_range(again)) break;
+            return;
+        }
 
     // Help a team-mate flagged in shared memory. Only when we carry no gems:
     // a lost bag costs the whole trip.
