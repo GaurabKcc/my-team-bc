@@ -139,6 +139,21 @@ bool attack_camps() {
     return false;
 }
 
+bool under_threat() {
+    auto& me = cambc::self();
+    for (const auto& camp : cambc::vision::camps()) {
+        if (camp.health() > 0 && distance(me.position(), camp.position()) <= camp.attack_range())
+            return true;
+    }
+    for (const auto& enemy : cambc::vision::champions(team::enemy)) {
+        if (!enemy.is_visible() || enemy.health() <= 0)
+            continue;
+        if (distance(me.position(), enemy.position()) <= enemy.attack_range() + 1)
+            return true;
+    }
+    return false;
+}
+
 void farm_camps(bool engage_shooter) {
     cast_offensive_ability();
 
@@ -165,10 +180,10 @@ void farm_camps(bool engage_shooter) {
         }
     }
 
-    if (move_towards_closest(goals)) {
-        cast_offensive_ability();
+    // Re-check camps after moving, but never cast there: "excludes walking"
+    // spells throw once we have moved (engine error 126) and waste the turn.
+    if (move_towards_closest(goals))
         attack_camps();
-    }
 }
 
 } // namespace
@@ -208,10 +223,18 @@ void Bot::play_turn() {
         if (count && me2.can_buy(item, count)) me2.buy(item, count);
     }
 
-    // Recall immediately when badly hurt away from spawn.
-    if (!at_spawn && me.health() < me.max_health() * 0.35f) {
-        me.recall();
-        return;
+    // SURVIVAL: run clear of damage first, then recall. Recall is cancelled
+    // by any hit, so recalling while a camp or enemy can still reach us is how
+    // the team gets pummeled. Carriers bail out sooner: dying donates the bag.
+    if (!at_spawn) {
+        const float bail = me.gem_count() > 0 ? 0.5f : 0.3f;
+        if (me.health() < me.max_health() * bail) {
+            if (under_threat())
+                move_towards_closest(cambc::map::spawn_region(team::ally));
+            else
+                me.recall();
+            return;
+        }
     }
 
     // Pop a heal or shield before brawling or farming while not critically hurt.

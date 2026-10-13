@@ -219,3 +219,48 @@ Rule 10 fixed by this file.
 - Beats gaurab-test 1012-798 head-to-head.
 - Crushes old my-bot 1012-44.
 - Zero crashes all games.
+
+## 2026-10-14 — claims/Voronoi experiment (failed)
+
+- Hypothesis: claims/Voronoi partition prevents ally clustering on same camps.
+- Test: added `claims()` Voronoi filter to `farm_camps` goals.
+- Results: 6-3 vs starter (was 9-0), MORE deaths on interlock/rows, slightly better on lanes.
+- Mechanism: Voronoi too aggressive — starved bots of targets, prevented allies from helping each other, broke the natural distance-weighted spread.
+- Lesson: distance-weighted scoring already spreads allies naturally; Voronoi is overkill and breaks cooperation.
+- Decision: REVERTED. 9-0 version restored.
+
+## 2026-10-15 — survival pass: run-then-recall + cast-after-move fix
+
+Context: user reported the team "gets pummeled" and champions keep fighting
+at low HP. Platform CSV (Downloads/match-analytics.csv, we were Team A)
+showed the real shape of the loss: 372 gems, 17 captures, 0 kills,
+160 gold, 3/6 alive vs 1016/46/5/1060/6/6. Deaths donate the whole gem bag
+plus 50 gold, so survival converts directly into score.
+
+- Hypothesis 1: champions call `recall()` while a camp/enemy can still reach
+  them. Recall is cancelled by damage, so the channel restarts or they die.
+  Fix: run clear of damage FIRST, recall only when nothing can hit us.
+  Bail threshold: 30% HP, or 50% while carrying gems (dying costs the bag).
+- Hypothesis 2: `farm_camps` moved, then called `cast_offensive_ability()`.
+  "Excludes walking" spells throw `error 126` after a move; main.cpp caught
+  it and ended the turn, wasting it. Measured 23 occurrences on collision.
+  Fix: after a move, re-check camps for a basic attack but never cast.
+- Test conditions: `cambc run my-bot starter-cpp`, all 9 pool maps, full games.
+
+- Result: RIGHT. Record 8W-1L. Deaths collapsed: collision 16 -> 2, and
+  10 total deaths across all 9 games. Error-126 occurrences 23 -> 0.
+  Wins got faster (collision 1012 by round 675 vs 760 before).
+- Threshold tune: relaxing the non-carrier bail 0.30 -> 0.35 made monolith
+  WORSE (924 -> 836). Deaths donate gems, so caution pays. Kept 0.30.
+- Regression: monolith 924-1032, the one loss (champion won it 1018-564).
+  We take 12 kills / 0 deaths there but farm gems slower than a bot that
+  dies 48 times. OPEN: map-specific aggressiveness for monolith.
+- Process lesson (rules 8 and 10, now enforced): measure before changing.
+  Three of my intermediate builds scored 0 gems/damage and I mis-attributed
+  the cause twice ("wards block turns" was wrong - the call was commented out).
+  Fuel was instrumented and ruled out (65-85k of 100k spent, never exhausted).
+  The 223 "faults" in one build came from an over-engineered flee path that
+  redrew chebyshev bitboards per camp per turn; replaced with a cheap
+  distance check. Kept only the two changes that measured clean.
+- Decision: KEEP both fixes. Skipped the redundant brawl-gating and defensive
+  -ability-restructure experiments (the survival block returns before brawl).
