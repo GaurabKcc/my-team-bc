@@ -15,6 +15,29 @@ int distance(vec2 a, vec2 b) {
     return static_cast<int>(a.chebyshev_distance(b));
 }
 
+bool is_self(const cambc::champion& other) {
+    return static_cast<cambc::handle_champion_t>(other)
+        == static_cast<cambc::handle_champion_t>(cambc::self());
+}
+
+// Claim partition (from the Khaos postmortem): a tile belongs to whichever
+// living ally is closest, so teammates spread out instead of clumping.
+bool claims(vec2 goal) {
+    auto& me = cambc::self();
+    const int mine = distance(me.position(), goal);
+    for (const auto& ally : cambc::vision::champions(team::ally)) {
+        if (is_self(ally) || !ally.is_visible() || ally.health() <= 0)
+            continue;
+        const int theirs = distance(ally.position(), goal);
+        if (theirs < mine)
+            return false;
+        if (theirs == mine
+            && static_cast<int>(ally.champion_name()) < static_cast<int>(me.champion_name()))
+            return false;
+    }
+    return true;
+}
+
 cambc::bitboard tiles_around(vec2 position, int radius) {
     cambc::bitboard tiles;
     tiles.clear();
@@ -54,8 +77,15 @@ bool move_towards_closest(cambc::bitboard goals) {
     auto step = me.position();
     for (auto tile : blocked.reachable_tiles(step, me.base_stats().base_move_speed).positions())
         if (field.get(tile) < field.get(step)) step = tile;
+    if (step != me.position())
+        return me.move_absolute(step);
 
-    return step != me.position() && me.move_absolute(step);
+    // Local minimum (e.g. a goal boxed in by terrain): nudge greedily toward the
+    // nearest goal rather than idling in place for the rest of the game.
+    vec2 nearest = goals.positions()[0];
+    for (auto tile : goals.positions())
+        if (field.get(tile) < field.get(nearest)) nearest = tile;
+    return me.move_towards(nearest);
 }
 
 void Bot::buy_items() {
@@ -79,34 +109,130 @@ bool attack_if_in_range(const Target& target) {
     return true;
 }
 
-// Attack a camp already in range, otherwise move toward the nearest camp tiles.
-void farm_camps() {
-    for (const auto& camp : cambc::vision::camps())
-        if (attack_if_in_range(camp))
-            return;
+// Cast the first ready attack-reset so we can swing our basic attack again.
+bool use_attack_reset() {
+    auto& me = cambc::self();
+    if (!me.can_cast()) return false;
+    for (auto& ability : me.abilities())
+        if (ability.is_ready() && ability.is_attack_reset() && ability.can_target_self())
+            return ability.use();
+    return false;
+}
 
-    // Union every group's spawn tiles except visibly respawning groups.
+// Cast the first ready damage/area/cc ability onto an in-range camp or enemy.
+bool cast_offensive_ability() {
+    auto& me = cambc::self();
+    if (!me.can_cast()) return false;
+    auto abilities = me.abilities();
+    for (auto& ability : abilities) {
+        if (!ability.is_ready()) continue;
+        if (!ability.is_damage() && !ability.is_aoe_damage() && !ability.is_cc()) continue;
+        if (ability.can_target_camps() || ability.can_target_enemies()) {
+            if (ability.can_target_camps())
+                for (const auto& target : cambc::vision::camps())
+                    if (target.health() > 0 && ability.valid_tiles().is_set(target.position())
+                        && ability.use(target))
+                        return true;
+            if (ability.can_target_enemies())
+                for (const auto& target : cambc::vision::champions(team::enemy))
+                    if (target.is_visible() && target.health() > 0
+                        && ability.valid_tiles().is_set(target.position()) && ability.use(target))
+                        return true;
+        }
+        // Ground-targeted area effects land on one tile and splash its neighbours.
+        if (ability.can_target_ground()) {
+            for (const auto& target : cambc::vision::camps())
+                if (target.health() > 0 && ability.valid_tiles().is_set(target.position())
+                    && ability.use(target.position()))
+                    return true;
+            for (const auto& target : cambc::vision::champions(team::enemy))
+                if (target.is_visible() && target.health() > 0
+                    && ability.valid_tiles().is_set(target.position()) && ability.use(target.position()))
+                    return true;
+        }
+    }
+    return false;
+}
+
+// Cast a ready heal or shield on ourselves or a hurt nearby ally.
+bool cast_defensive_ability() {
+    auto& me = cambc::self();
+    if (!me.can_cast()) return false;
+    for (auto& ability : me.abilities()) {
+        if (!ability.is_ready()) continue;
+        if (!ability.is_heal() && !ability.is_shield()) continue;
+        if (ability.can_target_self()) {
+            ability.use();
+            return true;
+        }
+        if (ability.can_target_allies()) {
+            for (const auto& ally : cambc::vision::champions(team::ally))
+                if (ally.is_visible() && ally.health() > 0 && ally.health() < ally.max_health() * 0.6f
+                    && ability.valid_tiles().is_set(ally.position()) && ability.use(ally))
+                    return true;
+        }
+    }
+    return false;
+}
+
+// Swing at a camp and cash in an attack-reset for a second swing the same turn.
+bool attack_camps() {
+    for (const auto& camp : cambc::vision::camps())
+        if (attack_if_in_range(camp)) {
+            if (use_attack_reset())
+                for (const auto& again : cambc::vision::camps())
+                    if (attack_if_in_range(again)) break;
+            return true;
+        }
+    return false;
+}
+
+// Attack a camp already in range, otherwise move onto a claimed camp region.
+// When being shot from out of range, close in on the visible camp instead.
+void farm_camps(bool engage_shooter) {
+    cast_offensive_ability();
+
+    if (attack_camps())
+        return;
+
     cambc::bitboard goals;
     goals.clear();
-    const auto visible = cambc::vision::visible_tiles();
-    for (const auto& group : cambc::map::camp_groups()) {
-        const bool group_visible = !(group.spawn_tiles() & visible).is_empty();
-        if (group_visible && std::holds_alternative<cambc::map::camp_group_respawning>(group.state()))
-            continue;
-        goals |= group.spawn_tiles();
+
+    if (engage_shooter) {
+        const int range = cambc::self().attack_range();
+        for (const auto& camp : cambc::vision::camps())
+            if (camp.health() > 0)
+                goals |= tiles_around(camp.position(), range);
+    }
+
+    if (goals.is_empty()) {
+        // Union every group's spawn tiles, skipping groups that are
+        // visibly respawning.
+        const auto visible = cambc::vision::visible_tiles();
+        for (const auto& group : cambc::map::camp_groups()) {
+            const bool group_visible = !(group.spawn_tiles() & visible).is_empty();
+            if (group_visible && std::holds_alternative<cambc::map::camp_group_respawning>(group.state()))
+                continue;
+            goals |= group.spawn_tiles();
+        }
     }
 
     // Fresh vision after movement may reveal a camp already in range.
-    if (move_towards_closest(goals))
-        for (const auto& camp : cambc::vision::camps())
-            if (attack_if_in_range(camp))
-                return;
+    if (move_towards_closest(goals)) {
+        cast_offensive_ability();
+        attack_camps();
+    }
 }
 
 void Bot::play_turn() {
     // Initialise this champion's build and read the draft message once.
     if (chosen_stat < 0) {
-        chosen_stat = random_number(3);
+        // Deterministic build: power shards of strength scale our basic attacks.
+        // Never buy focus shards because this bot never casts abilities.
+        // Small drafts fight short, burst-heavy skirmishes, so stack strength to
+        // win trades. Larger drafts are attrition fights where health shards keep
+        // champions alive long enough to bank their gems.
+        chosen_stat = cambc::draft::team_size() <= 3 ? 0 : 2;
         std::cout << "draft: " << std::string(reinterpret_cast<const char*>(cambc::draft_memory.data()), 11) << '\n';
     }
 
@@ -124,6 +250,12 @@ void Bot::play_turn() {
         || (!me.can_move() && !me.can_attack()))
         return;
 
+    // Remember progress: losing health since last turn means something is hitting us.
+    const bool took_damage = has_memory && me.health() < last_health;
+    last_health = me.health();
+    last_position = me.position();
+    has_memory = true;
+
     // Shop before leaving spawn.
     const bool at_spawn = cambc::map::spawn_region(team::ally).is_set(me.position());
     if (at_spawn)
@@ -135,10 +267,18 @@ void Bot::play_turn() {
         return;
     }
 
-    // Attack the first enemy champion already in range.
+    // Pop a heal or shield before brawling or farming while not critically hurt.
+    if (me.health() < me.max_health() * 0.6f)
+        cast_defensive_ability();
+
+    // Brawl: swing at an adjacent enemy and cash an attack-reset for a second swing.
     for (const auto& enemy : cambc::vision::champions(team::enemy))
-        if (attack_if_in_range(enemy))
+        if (attack_if_in_range(enemy)) {
+            if (use_attack_reset())
+                for (const auto& again : cambc::vision::champions(team::enemy))
+                    if (attack_if_in_range(again)) break;
             return;
+        }
 
     // Bank any carried gems before farming.
     if (me.gem_count() > 0) {
@@ -157,7 +297,10 @@ void Bot::play_turn() {
         return;
     }
 
-    farm_camps();
+    // Only chase a distant shooter when already hurt enough to matter.
+    farm_camps(took_damage);
 
-    me.set_priority(1 + random_number(100));
+    // Per-champion priority spreads within-team turn order; seed comes from our
+    // spawn tile so it is stable for a given champion.
+    me.set_priority(static_cast<std::int32_t>(1 + random_number(100)));
 }
