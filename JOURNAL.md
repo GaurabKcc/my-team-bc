@@ -447,3 +447,41 @@ been repeating since fb45fda.
 - OPEN: with every recent version clustered at 3-1/2-2, the next real gains
   have to come from PvP (against the ladder bot we die 7-10 times per game and
   score 0-1 kills) rather than from more farming efficiency.
+
+## 2026-10-15 — PvP: four hypotheses tested, all refuted
+
+User asked to attack PvP. Baseline with scripts/verify.sh opponents, three
+maps each (collision/interlock/monolith) against hist-surv, hist-wards and
+hist-monster: **3-6**.
+
+Evidence gathered first. Detail from our 0-3 loss to hist-surv on collision:
+
+| | ours | hist-surv |
+|---|---|---|
+| champion damage dealt | 2,895 | 14,078 |
+| champion damage taken | 14,078 | 2,895 |
+| monster damage | 20,605 | 69,441 |
+| deaths | 10 | 0 |
+
+We deal a fifth of the damage we take and kill nobody. That points at losing
+fights, not at farming. Four candidate causes, each toggled and re-measured:
+
+| Experiment | PvP record | verdict |
+|---|---|---|
+| HEAD, everything on | **3-6** | baseline |
+| dash-escape disabled | 2-7 | dash HELPS |
+| help-out disabled | 1-7 | help HELPS |
+| brawl gate (only swing when not outnumbered) | 1-8 | attacking MORE is better |
+| wards disabled | 1-8 | wards HELP |
+
+- Result: every hypothesis refuted, and in the same direction. The current
+  build is a local optimum: removing any component costs PvP wins.
+- Note the brawl gate result contradicts the earlier damage reading. Being
+  cautious about engaging is actively harmful; the problem is not that we
+  start fights we should avoid, it is that we lose the ones we start.
+- Decision: KEEP everything, change nothing. Recorded so these are not
+  retried.
+- OPEN, and now the top item: we deal 2,895 champion damage while taking
+  14,078. None of flee/hide/ward/dash changes close that. Worth testing next:
+  what makes us lose a straight fight - focus-fire order, stun usage on the
+  enemy carry, the strength/health shard split, or shield timing on Varg.
