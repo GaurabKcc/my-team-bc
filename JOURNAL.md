@@ -416,3 +416,34 @@ over the bytes; readers discard pings older than 4 rounds.
 - Result: 9W-0L maintained and faster again (collision r690 -> r641, corners
   r416 -> r405, monolith r977 -> r821, interlock 1 death -> 0 and 1046 gems).
   Deaths across the round-robin 9 -> 7.
+
+## 2026-10-15 — CORRECTION: the "9-0 champion" label was inflated
+
+User asked to verify against older versions. Doing so overturned a claim I had
+been repeating since fb45fda.
+
+- Every result up to this point was measured ONLY against starter-cpp, which
+  barely fights. scripts/verify.sh rebuilds older revisions of our own bot
+  (fb45fda, e0051d0, 30f26df, 0400f14) and runs a round-robin. Those versions
+  do fight.
+- Collision league, all pairs:
+    hist-surv 3-1, hist-wards 3-1, my-bot 3-1, hist-monster 1-3,
+    hist-9zero 0-4.
+  Rows league: hist-surv 3-1, hist-wards 3-1, hist-monster 2-2, my-bot 2-2,
+  hist-9zero 0-4.
+- fb45fda, the commit I repeatedly called the "9-0 champion" and promoted twice,
+  is the WEAKEST of the five at 0-4. Its 9-0 record was an artefact of
+  testing against a strawman. I should have caught this by testing against a
+  competent opponent much earlier.
+- The genuinely important change was the survival pass (e0051d0): deaths per
+  game fell from 19-24 (hist-9zero) to 0-7. That is the real win.
+- The three most recent versions are roughly equal and cycle each other
+  (surv > wards > my-bot > surv), so the later additions - Monster shards,
+  shared-memory help, wards, dash, closest-ally rescue - neither regressed nor
+  decisively helped. They are neutral against competent opposition so far.
+- Process rule going forward, now in scripts/verify.sh: any change is verified
+  against historical revisions, never only against starter-cpp, and no version
+  is described as a champion on the strength of a non-fighting opponent.
+- OPEN: with every recent version clustered at 3-1/2-2, the next real gains
+  have to come from PvP (against the ladder bot we die 7-10 times per game and
+  score 0-1 kills) rather than from more farming efficiency.

@@ -11,3 +11,4 @@ matches/
 bots/*/build/
 bots/*/target/
 *.pdf
+bots/hist-*/
