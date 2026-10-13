@@ -481,7 +481,18 @@ fights, not at farming. Four candidate causes, each toggled and re-measured:
   start fights we should avoid, it is that we lose the ones we start.
 - Decision: KEEP everything, change nothing. Recorded so these are not
   retried.
-- OPEN, and now the top item: we deal 2,895 champion damage while taking
-  14,078. None of flee/hide/ward/dash changes close that. Worth testing next:
-  what makes us lose a straight fight - focus-fire order, stun usage on the
-  enemy carry, the strength/health shard split, or shield timing on Varg.
+- Shard split tested, also neutral: always-strength 2-7, always-health 3-6,
+  the existing size-based split 3-6. Not the answer.
+- Farm-target commitment WAS the answer, and it was our own doing. Re-picking
+  the best group each turn instead of holding one until it died: monster
+  damage 20,607 -> 26,498, champion damage 2,895 -> 3,442, damage taken
+  14,078 -> 11,579, deaths 10 -> 8, gems 110 -> 220 on the hist-surv match.
+  PvP 3-6 -> 4-5, hist-surv matchup 0-3 -> 1-2, still 9-0 vs starter-cpp and
+  faster on most maps. The commit that introduced commitment fixed banking
+  (kept: altar commitment) and quietly cost a third of our farming (dropped:
+  farm commitment).
+- OPEN, still the top item: we deal 3,442 champion damage while taking 11,579.
+  We lose straight fights and every "do not engage / disengage more" change
+  makes it worse, which points at winning or surviving fights rather than
+  avoiding them: focus-fire re-targeting, stun on the enemy carry, or shield
+  timing on Varg.
