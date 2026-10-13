@@ -292,3 +292,27 @@ we had 0.
   Gem scores up across the board (interlock gold 1390 -> 2010-3620).
   Corners is now the only loss (882-1038), previously a 1006-150 win.
 - Decision: KEEP. Corners regression logged OPEN.
+
+## 2026-10-15 — drafting: mirroring diagnosed, counter-draft NOT validated
+
+Observation from the last round-robin drafts: Varg first on 8 of 9 maps, our
+draft overlapped the opponent's on 9 of 9, and BOTH teams drafted Cassi &
+Issac on 5 of 9. That last one is a genuine asymmetry - either body's death
+kills both, so mirroring it costs both teams two champions at once.
+
+- Hypothesis: bias picks away from what the opponent already holds.
+- Tested three variants over the full 9-map round-robin:
+  - no counter-draft (baseline): 8W-1L, corners 882 L, monolith 1034 W
+  - full anti-mirror (-25 any mirrored pick, -60 Cassi&Issac): 8W-1L,
+    corners 782 L, monolith 1012 W
+  - Cassi&Issac-only penalty (-60): 7W-2L, corners 882 L, monolith 770 L
+- Result: NO variant beat the baseline. The mirroring problem is real, but
+  the fix is unmeasurable against starter-cpp: its draft is random, so
+  mirroring costs it nothing, and every difference observed was draft luck
+  rather than counter-drafting working.
+- Decision: REVERT to baseline scoring (ba9b7b5). Only the stale draft-memory
+  plan text was corrected - it still advertised ward-first, Monster emblem
+  and stuck detection, none of which exist in the bot.
+- OPEN: counter-drafting needs a real opponent to evaluate. If the ladder bot
+  mirrors Cassi & Issac, declining it is likely worth more than any local
+  number here. Test before shipping.
