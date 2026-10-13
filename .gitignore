@@ -1,0 +1,7 @@
+.cambc/
+replays/
+compile_commands.json
+.vscode/
+sdk/
+cmake/
+Desktop/
