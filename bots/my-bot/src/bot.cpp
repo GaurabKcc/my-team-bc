@@ -83,26 +83,33 @@ bool cast_offensive_ability() {
     for (auto& ability : abilities) {
         if (!ability.is_ready()) continue;
         if (!ability.is_damage() && !ability.is_aoe_damage() && !ability.is_cc()) continue;
-        if (ability.can_target_camps() || ability.can_target_enemies()) {
-            if (ability.can_target_camps())
-                for (const auto& target : cambc::vision::camps())
-                    if (target.health() > 0 && ability.valid_tiles().is_set(target.position())
-                        && ability.use(target))
-                        return true;
+        // Enemies first. Casting camps-first meant that with a camp adjacent
+        // we spent our burst damage and our stuns on monsters while an enemy
+        // champion was hitting us, which is most of why we dealt 3,442
+        // champion damage while taking 11,579.
+        if (ability.can_target_enemies() || ability.can_target_ground()) {
             if (ability.can_target_enemies())
                 for (const auto& target : cambc::vision::champions(team::enemy))
                     if (target.is_visible() && target.health() > 0
                         && ability.valid_tiles().is_set(target.position()) && ability.use(target))
                         return true;
+            if (ability.can_target_ground())
+                for (const auto& target : cambc::vision::champions(team::enemy))
+                    if (target.is_visible() && target.health() > 0
+                        && ability.valid_tiles().is_set(target.position())
+                        && ability.use(target.position()))
+                        return true;
+        }
+        if (ability.can_target_camps()) {
+            for (const auto& target : cambc::vision::camps())
+                if (target.health() > 0 && ability.valid_tiles().is_set(target.position())
+                    && ability.use(target))
+                    return true;
         }
         if (ability.can_target_ground()) {
             for (const auto& target : cambc::vision::camps())
                 if (target.health() > 0 && ability.valid_tiles().is_set(target.position())
                     && ability.use(target.position()))
-                    return true;
-            for (const auto& target : cambc::vision::champions(team::enemy))
-                if (target.is_visible() && target.health() > 0
-                    && ability.valid_tiles().is_set(target.position()) && ability.use(target.position()))
                     return true;
         }
     }
