@@ -177,7 +177,110 @@ bool group_is_heavy(const cambc::map::camp_group& group) {
     return false;
 }
 
+// Shared memory, 8 bytes, team-private:
+//   0..1  round number (u16) - stale pings can be spotted and ignored
+//   2..3  alert tile x (i16, 30000 = none)
+//   4..5  alert tile y (i16)
+//   6     severity (0 none, 1 enemy seen, 2 ally in trouble)
+//   7     reserved
+// Vision is not shared between champions, so this is the only way to tell a
+// team-mate that trouble is near them.
+struct TeamSignal {
+    std::uint16_t round;
+    std::int16_t x;
+    std::int16_t y;
+    std::uint8_t severity;
+    std::uint8_t spare;
+};
+
+constexpr std::int16_t kNoTile = 30000;
+
+TeamSignal read_signal() {
+    TeamSignal s{};
+    try {
+        cambc::shared_memory.read(0, std::span{&s, std::size_t{1}});
+    } catch (...) {
+    }
+    return s;
+}
+
+void write_signal(const TeamSignal& s) {
+    try {
+        cambc::shared_memory.write(0, std::span{&s, std::size_t{1}});
+    } catch (...) {
+    }
+}
+
 } // namespace
+
+void Bot::update_signal() {
+    auto& me = cambc::self();
+    const auto now = static_cast<std::uint16_t>(cambc::round_number());
+    auto sig = read_signal();
+
+    // Raise an alert when enemies are close to an ally, or when we are hurt
+    // and being hit. Allies act on it; we never chase it ourselves.
+    std::int16_t ax = kNoTile, ay = kNoTile;
+    std::uint8_t sev = 0;
+    for (const auto& enemy : cambc::vision::champions(team::enemy)) {
+        if (!enemy.is_visible() || enemy.health() <= 0)
+            continue;
+        for (const auto& ally : cambc::vision::champions(team::ally)) {
+            if (ally.position().x == me.position().x
+                && ally.position().y == me.position().y)
+                continue;
+            if (!ally.is_visible() || !ally.is_alive())
+                continue;
+            if (distance(enemy.position(), ally.position()) <= 4) {
+                ax = static_cast<std::int16_t>(ally.position().x);
+                ay = static_cast<std::int16_t>(ally.position().y);
+                sev = 2;
+            }
+        }
+    }
+    if (sev == 0 && me.health() < me.max_health() * 0.35f) {
+        for (const auto& enemy : cambc::vision::champions(team::enemy)) {
+            if (enemy.is_visible() && enemy.health() > 0
+                && distance(me.position(), enemy.position()) <= 5) {
+                ax = static_cast<std::int16_t>(me.position().x);
+                ay = static_cast<std::int16_t>(me.position().y);
+                sev = 2;
+                break;
+            }
+        }
+    }
+
+    // Only write on change or refresh periodically, so champions covering
+    // different parts of the map do not fight over the same bytes.
+    const bool changed = sev != sig.severity
+        || (sev != 0 && (sig.x != ax || sig.y != ay));
+    if (changed || sig.round + 10 < now) {
+        sig.round = now;
+        sig.x = ax;
+        sig.y = ay;
+        sig.severity = sev;
+        write_signal(sig);
+    }
+}
+
+// Should this champion break off to defend a team-mate in trouble?
+bool Bot::should_help() {
+    auto& me = cambc::self();
+    const auto sig = read_signal();
+    if (sig.severity < 2 || sig.x == kNoTile)
+        return false;
+    if (static_cast<std::int16_t>(cambc::round_number() - sig.round) > 4)
+        return false; // stale ping
+    // Never abandon a bag of gems, and never abandon a camp we are clearing:
+    // both cost more than the rescue is worth.
+    if (me.gem_count() > 0)
+        return false;
+    if (!cambc::vision::camps().empty())
+        return false;
+    const int d = distance(me.position(), vec2{sig.x, sig.y});
+    return d <= 6;
+}
+
 
 cambc::bitboard Bot::farm_goal(bool& committed) {
     const auto visible = cambc::vision::visible_tiles();
@@ -324,18 +427,10 @@ void Bot::play_turn() {
         chosen_stat = cambc::draft::team_size() <= 3 ? 0 : 2;
     }
 
-    std::uint32_t round = 0;
-    try {
-        cambc::shared_memory.read(0, std::span{&round, 1});
-    } catch (...) {
-    }
-    round = cambc::round_number();
-    try {
-        cambc::shared_memory.write(0, std::span{&round, 1});
-    } catch (...) {
-    }
-
     auto& me = cambc::self();
+
+    // Publish danger for team-mates before acting on anything.
+    update_signal();
 
     if (!me.is_alive() || me.is_recalling() || me.is_submitting_gems() || me.is_teleporting()
         || (!me.can_move() && !me.can_attack()))
@@ -396,6 +491,27 @@ void Bot::play_turn() {
     bank_target.clear();
 
     // Only chase a distant shooter when already hurt enough to matter.
+
+    // Help a team-mate flagged in shared memory. Only when we carry no gems:
+    // a lost bag costs the whole trip.
+    if (should_help()) {
+        const auto sig = read_signal();
+        const vec2 spot{sig.x, sig.y};
+        if (distance(me.position(), spot) <= me.attack_range() + 2) {
+            for (const auto& enemy : cambc::vision::champions(team::enemy))
+                if (attack_if_in_range(enemy))
+                    return;
+        } else if (!move_towards_closest(tiles_around(spot, 1))) {
+            farm_camps(false);
+            return;
+        } else {
+            cast_offensive_ability();
+            for (const auto& enemy : cambc::vision::champions(team::enemy))
+                if (attack_if_in_range(enemy))
+                    return;
+        }
+        return;
+    }
     farm_camps(false);
 
     me.set_priority(static_cast<std::int32_t>(1 + random_number(100)));

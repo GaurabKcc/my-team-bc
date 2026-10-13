@@ -338,3 +338,53 @@ from reading the source.
   882 loss to a 1018 win finishing at round 758. Deaths down to 3 total.
   Verified 31 Monster emblems completed on elkring, previously 0.
 - Decision: KEEP.
+
+## 2026-10-15 — post-mortem of the ladder loss; shared-memory danger signal
+
+User asked how a winnable game was lost. From Downloads/match-analytics (1).csv
+(we = A, 301 rounds, final 154 gems vs 484):
+
+- We led on captures at almost every checkpoint (r80 6v3, r100 7v4, r160 11v8,
+  r220 18v13) and on gold until r160. We lost the game on CONVERSION.
+- Submitted gems froze at 132 from round 180 to 300 while carried gems climbed
+  22 -> 44 -> 58 -> 80 -> 102. We were farming faster than the winner and
+  banking nothing: 7.7 gems per capture against their 24.2.
+- Root cause already fixed by bank_target commitment (couriers pacing between
+  equidistant altars). Verified by measuring conversion directly from the
+  stats export (collectedGems vs submittedGems): HEAD now converts 96.9% on
+  rows, 93.9% collision, 88.8% interlock.
+- Second finding: the turn order ran SURVIVAL and BRAWL ahead of BANKING, and
+  both return early, so a champion hauling gems would run away or stop to fight
+  instead of banking. Tested banking first: rows 1056 -> 990 and collision
+  deaths 0 -> 3, i.e. it steals farming time. Reverted.
+
+### Anti-clustering attempt (failed twice, reverted)
+- Assigned each champion its own camp group at draft time (groups sorted by
+  gems/gold/position, written into draft memory) so the team stops converging
+  on one camp while champions holding a 5-round capture keep farming.
+- Failed because `cambc::draft_memory` takes `std::byte`, not `std::uint8_t`;
+  the write threw, `pick()` never ran, and the engine filled picks randomly
+  (comps like "Varg, Tavi, Ren" where the map should give "Varg, Cassi & Issac,
+  Ryth"). 9-0 dropped to 5W-4L. Reverted both times.
+- OPEN: still wanted. Verify draft picks are deterministic before trusting any
+  match result from a build that touches draft memory.
+
+### Shared memory: danger signal and helping out (KEPT)
+8-byte team-private layout, replacing the old round counter:
+  bytes 0-1 round (u16), 2-3 alert tile x (i16, 30000 = none), 4-5 alert y,
+  6 severity (0 none / 1 enemy seen / 2 ally in trouble), 7 reserved.
+Vision is not shared, so this is the only way a champion can tell a team-mate
+trouble is near them. Alerts are published when an enemy is within 4 of an
+ally, or when we are under 35% health with an enemy within 5. Writes happen on
+change or every 10 rounds so champions covering different areas do not fight
+over the bytes; readers discard pings older than 4 rounds.
+
+- First cut reacted to any ping within 12 tiles: corners fell 882 -> 578 and
+  interlock slowed to round 1275. Rescuing team-mates off productive camps
+  costs more farm time than it returns.
+- Tightened: severity >= 2 only, ping age <= 4 rounds, never while carrying
+  gems, never while a camp is in vision, and only within 6 tiles.
+- Result: 9W-0L across all 9 maps. Corners 882 -> 1024, and most maps finish
+  sooner (collision round 666, corners 565, interlock 546).
+- Decision: KEEP. Value against a genuinely aggressive opponent is still
+  untested locally; the conservative thresholds are the measured part.
