@@ -127,7 +127,6 @@ Rule 6 partial (no byte layout; persistence unverified). Rule 8 unmeasured.
 Rule 10 fixed by this file.
 
 ## 2026-10-14 — port rush-tribute winner into my-bot, dispose rush-tribute
-
 - Hypothesis: copied sources behave identically under the `my-bot` name.
 - Baseline: rush-tribute game 5 (1002 vs 880 W, r1533, collision).
 - Test: `diff -r bots/my-bot/src bots/rush-tribute/src` (identical), then
@@ -142,3 +141,81 @@ Rule 10 fixed by this file.
   (+read-journal preamble), `JOURNAL.md`, 9 pool-map renames, ported
   `bots/my-bot/src/*`, `BotAPICpp.md`, `GameRules.md`. `postmortem.pdf`
   excluded (now covered by `*.pdf` ignore).
+
+## 2026-10-14 — pack-hunt experiment (50/50 split + HP-swap at 40%)
+
+- Hypothesis: split packs onto two groups + healthy steps in for hurt allies
+  (<40%) while low ally recalls; weakest-enemy-first kills.
+- Baseline: winner 1002 vs 880 (r1533, collision).
+- Tests (all `cambc run my-bot starter-cpp`, collision, full games):
+  - Full batch (split + step-in + flat 40% + weakest-enemy): 680 vs 1010 L.
+  - Split fallback (>=60% rule): identical 680 vs 1010 (split always active).
+  - Split disabled (step-in + 40% + weakest-enemy kept): 668 vs 1018 L —
+    split was not the sole cause.
+  - Step-in ONLY on winner baseline: 854 vs 1004 L (r1581).
+- Result: WRONG as implemented. Step-in alone cost ~150 gems: healthy
+  farmers walk off their camps toward hurt allies (travel waste, shared
+  danger). Deaths stayed low (7-10), damage held (~42-47k), but conversion
+  dropped — banking/conversion suffered, not survival.
+- Lesson (agents.md#10): batched 4 variables in one A/B; attribution took
+  3 extra full games. One variable per A/B from now on.
+- Decision: REVERT all — `my-bot` restored byte-identical to 2452dae winner.
+- OPEN: constrained step-in (mate within <=3 AND already sharing the camp,
+  i.e. zero travel) remains untried.
+
+## 2026-10-14 — round-robin: my-bot vs starter-cpp, all 9 pool maps
+
+- Baseline: 2452dae winner. Full games, collision default otherwise.
+- Result: 5W-4L.
+  - W: collision 1002-880 (r1533), corners 1014-526 (r824),
+    expanse 1022-880 (r865), packs 1006-620 (r745), rows 1012-792 (r871).
+  - L: elkring 0-1008 SHUTOUT, interlock 478-1008, lanes 912-1004,
+    monolith 880-1004.
+- Team sizes are map-defined (3-5 picks); draft fills every slot offered
+  (3: collision/expanse/packs; 4: interlock/rows; 5: corners/elkring/lanes/
+  monolith). No way to force 5 slots — size comes from the map.
+- Zero crashes in all 9 games.
+
+## 2026-10-14 — elkring deadlock fix (0 dmg in 1008 rounds)
+
+- Hypothesis: heavy-group filter (skip Elk/Monolith pre-emblem) deadlocks
+  maps with only heavy groups — 0 gold means 0 emblems forever.
+- Evidence: elkring A had 0 gems/0 dmg/0 deaths/0 errors; B (no filter)
+  farmed the same camps to 5850 gold.
+- Fix: two-pass farm targeting — skip heavy on pass 0, engage best-heavy
+  on pass 1 if pass 0 found nothing. Pass-0 behavior unchanged, so other
+  maps' deterministic tapes are unaffected.
+- Test: `--map elkring-<uuid>` rerun.
+- Result: RIGHT — 1008 vs 378 W in round 671 (was 0 vs 1008 L).
+  Round-robin stands at 6W-3L with the fix.
+- OPEN: interlock (lost PvP 6-16 kills), lanes 5v5, monolith — not yet
+  diagnosed.
+
+## 2026-10-14 — gaurab-branch analysis (9-0 bot)
+
+- Checked out origin/gaurab-branch (eee1932 "Make my-bot map-adaptive and beat starter on all 9 maps").
+- Verified 9-0 vs starter-cpp on all 9 maps (confirmed).
+- Key design: map-adaptive draft scoring (scans camps, picks Varg/Vendetta/Cassi&Issac based on grouped camps/wolves/elks), claims-based Voronoi partition (unused in practice), simple ability usage (attack-reset + offensive/defensive), two-pass heavy filter NOT present (engages all camps).
+- Key insight: extreme simplicity wins. No wards, no stuck detection, no HP-swap, no threat retreat, Power shards (no passive). The 9-0 bot is ~300 lines vs our 400+.
+
+## 2026-10-14 — hybrid bot iterations
+
+### Full hybrid (gaurab draft + our additions)
+- Added: ward-first, Monster→Home emblems, stuck detection, threat retreat, HP-swap, claims filter, two-pass heavy filter.
+- Result: 6-3 vs starter (same as my-bot), lost head-to-head vs gaurab-test 240-1000.
+- Diagnosis: claims filter prevented valid targets; HP-swap wasted travel; threat retreat wasted turns; ward-first took farm turns.
+
+### Minimal hybrid (gaurab core + Monster→Home emblems only)
+- Stripped ALL additions except: Monster→Home emblem progression (Power shards → Home after 5).
+- Kept gaurab's exact logic: map-adaptive draft, simple abilities, 0.35f recall, 0.6f defensive, attack-reset combo, engage-shooter farm, no claims, no wards, no stuck, no HP-swap, no threat retreat.
+- Result: 9-0 vs starter (all 9 maps), beats gaurab-test 1012-798 head-to-head, crushes my-bot 1012-44.
+- Faster wins on 7/9 maps vs gaurab-test (collision 760 vs 799, monolith 760 vs 955, packs 570 vs 635).
+- Decision: PROMOTE to my-bot. This is the new champion.
+
+## 2026-10-14 — my-bot promoted to minimal hybrid (9-0 champion)
+
+- `bots/my-bot/src/*` replaced with minimal hybrid sources.
+- Verified: collision 1012-286 W (r760), 9-0 round-robin confirmed.
+- Beats gaurab-test 1012-798 head-to-head.
+- Crushes old my-bot 1012-44.
+- Zero crashes all games.
