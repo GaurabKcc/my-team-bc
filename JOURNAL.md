@@ -491,8 +491,16 @@ fights, not at farming. Four candidate causes, each toggled and re-measured:
   faster on most maps. The commit that introduced commitment fixed banking
   (kept: altar commitment) and quietly cost a third of our farming (dropped:
   farm commitment).
-- OPEN, still the top item: we deal 3,442 champion damage while taking 11,579.
-  We lose straight fights and every "do not engage / disengage more" change
-  makes it worse, which points at winning or surviving fights rather than
-  avoiding them: focus-fire re-targeting, stun on the enemy carry, or shield
-  timing on Varg.
+- Recall-immediately instead of run-first: 3-6, worse than 4-5. Run-first
+  stays.
+- Ability targeting WAS a real bug: cast_offensive_ability checked camps
+  before enemies, so with a camp adjacent we spent burst damage and stuns on
+  monsters while an enemy champion was hitting us. Flipped to enemies first:
+  champion damage dealt 3,442 -> 5,360 (+56%), damage ratio 0.30 -> 0.40, PvP
+  4-5 -> 5-4, still 9-0 vs starter-cpp. Committed. Mixed signal recorded: the
+  single-map league read 2-2 where it read 3-1, a one-match difference, so no
+  league improvement is claimed.
+- OPEN: champion damage still trails damage taken (5,360 vs 13,504). Every
+  "fight less" change has now been refuted, so remaining ideas are about
+  winning fights outright - focus-fire re-targeting after a teammate joins,
+  and stun on the enemy gem carrier rather than on whoever is nearest.
