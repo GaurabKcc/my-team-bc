@@ -344,8 +344,13 @@ void Bot::play_turn() {
     const bool at_spawn = cambc::map::spawn_region(team::ally).is_set(me.position());
     if (at_spawn) {
         auto& me2 = cambc::self();
-        const std::array items{cambc::item_type::power_shard_of_strength,
-            cambc::item_type::power_shard_of_focus, cambc::item_type::power_shard_of_health};
+        // Monster, not Power: the emblem passive (+10% damage to camps) makes
+        // every later clear faster, which compounds into more captures per
+        // round. Power's passive is "None; one extra shard's worth" - flat
+        // stats only, and its emblem needs 6 shards instead of 5.
+        const std::array items{cambc::item_type::monster_shard_of_strength,
+            cambc::item_type::monster_shard_of_focus,
+            cambc::item_type::monster_shard_of_health};
         const auto item = items[chosen_stat];
         const unsigned count = me2.gold_count() / item.cost();
         if (count && me2.can_buy(item, count)) me2.buy(item, count);

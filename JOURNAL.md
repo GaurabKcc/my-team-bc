@@ -316,3 +316,25 @@ kills both, so mirroring it costs both teams two champions at once.
 - OPEN: counter-drafting needs a real opponent to evaluate. If the ladder bot
   mirrors Cassi & Issac, declining it is likely worth more than any local
   number here. Test before shipping.
+
+## 2026-10-15 — gold was being spent on the only family with no passive
+
+Question from the user: "does it even use the gold?" Answered from data, not
+from reading the source.
+
+- The bot spent 88% of earnings (1230 of 1390 in the loss CSV; 4920 of 5879
+  on elkring) - so yes, it spends. But every item bought was
+  `power_shard_of_*` / `power_emblem_of_*`, and Power's emblem passive is
+  literally "None; one extra shard's worth instead." Flat stats, no passive.
+- Every compounding family went unpurchased: Monster (+10% damage to camps),
+  Treasure (+20% gold), Jungle (-30% camp damage).
+- Compounding matters here because the diagnosed bottleneck was captures and
+  gold income, not raw damage: we captured as often as the winner (20 vs 20)
+  but banked 154 vs 484 gems, and earned 1390 vs 2340 gold.
+- Fix: same stat, Power family -> Monster family. Monster also combines at 5
+  shards (150g) instead of Power's 6 (180g), so the passive lands sooner and
+  cheaper.
+- Result: RIGHT. 9W-0L across all 9 maps (was 8W-1L). Corners flipped from an
+  882 loss to a 1018 win finishing at round 758. Deaths down to 3 total.
+  Verified 31 Monster emblems completed on elkring, previously 0.
+- Decision: KEEP.
