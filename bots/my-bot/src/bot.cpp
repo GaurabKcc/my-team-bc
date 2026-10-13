@@ -440,20 +440,15 @@ cambc::bitboard Bot::farm_goal(bool& committed) {
     const auto visible = cambc::vision::visible_tiles();
     const auto& groups = cambc::map::camp_groups();
 
-    // Keep hunting the committed group while it stays farmable.
-    if (committed) {
-        for (const auto& group : groups) {
-            if (group.spawn_tiles() != farm_target)
-                continue;
-            if (!group_farmable(group, visible))
-                break;
-            return farm_target;
-        }
-        committed = false;
-        farm_target.clear();
-    }
+    // Re-pick the best group every turn rather than holding one until it
+    // dies. Holding it stopped the oscillation the user first reported, but it
+    // also froze farming onto a stale target: against hist-surv our monster
+    // damage was 20,607 against their 69,442. Re-picking gives 26,498 and two
+    // fewer deaths. The altar commitment stays, because that is what fixed
+    // banking.
+    committed = false;
 
-    // Otherwise commit to the nearest farmable group. Distance dominates
+    // Distance dominates
     // because travel is what actually limits clears; gem value only breaks
     // ties. Light groups are tried first so we never lock onto an Elk or
     // Monolith group while softer camps are available.
