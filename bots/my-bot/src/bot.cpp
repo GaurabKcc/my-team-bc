@@ -282,6 +282,138 @@ bool Bot::should_help() {
 }
 
 
+// Place the free ward where it tells us the most. One active ward, replaceable
+// once per round, 6 tiles of permanent vision. Vision is not shared, so every
+// champion needs its own: watching the altar we are about to bank at spots
+// enemy locks before we commit, and watching our camp tells us it respawned
+// without walking over. The opponent ran 5 active wards in the loss match; we
+// ran none.
+void Bot::maybe_place_ward() {
+    auto& me = cambc::self();
+    if (me.ward_cooldown() != 0 || !me.can_move())
+        return;
+    auto placement = me.ward_placement_tiles();
+    if (placement.is_empty())
+        return;
+
+    cambc::bitboard want;
+    want.clear();
+
+    // 1. The altar we are carrying gems to: watch the approach for locks.
+    for (auto altar : cambc::map::altars().positions())
+        if (me.gem_count() > 0 && !cambc::vision::has_altar_lock(altar)) {
+            want = tiles_around(altar, cambc::constants::submit_gems_range);
+            break;
+        }
+    // 2. Otherwise the camp we are working, so we can see it respawn.
+    if (want.is_empty() && !farm_target.is_empty())
+        want = farm_target;
+    // 3. Otherwise the nearest altar: covers the team objective.
+    if (want.is_empty()) {
+        vec2 best{0, 0};
+        int best_dist = 1 << 20;
+        for (auto altar : cambc::map::altars().positions()) {
+            const int d = distance(me.position(), altar);
+            if (d < best_dist) {
+                best_dist = d;
+                best = altar;
+            }
+        }
+        if (best_dist != 1 << 20)
+            want = tiles_around(best, 2);
+    }
+    if (want.is_empty())
+        return;
+
+    auto tiles = want & placement;
+    if (tiles.is_empty())
+        tiles = want;
+    if (tiles.is_empty())
+        return;
+    try {
+        // Push the ward as far from us as the placement mask allows: it
+        // outlives us, so distance from our current tile is free range.
+        auto opts = tiles.positions();
+        vec2 best = opts[0];
+        int best_score = distance(me.position(), opts[0]);
+        for (auto tile : opts) {
+            const int d = distance(me.position(), tile);
+            if (d > best_score) {
+                best_score = d;
+                best = tile;
+            }
+        }
+        me.place_ward(best);
+    } catch (...) {
+    }
+}
+
+// Dash out of danger. Vendetta, Vesper Vale, Ren and Issac all carry a
+// two-tile dash on an 8-turn cooldown; spending it while a camp is beating on
+// us buys two free tiles before the walk-away, which is the difference
+// between escaping and feeding the bag. The dash crosses holes but not walls,
+// so we only consider tiles the engine already offers us.
+bool Bot::dash_escape() {
+    auto& me = cambc::self();
+    if (!me.can_cast())
+        return false;
+
+    cambc::bitboard danger;
+    danger.clear();
+    for (const auto& camp : cambc::vision::camps()) {
+        if (camp.health() > 0)
+            danger.draw_chebyshev(camp.position(), camp.attack_range());
+    }
+    for (const auto& enemy : cambc::vision::champions(team::enemy)) {
+        if (enemy.is_visible() && enemy.health() > 0)
+            danger.draw_chebyshev(enemy.position(), enemy.attack_range() + 1);
+    }
+
+    for (const auto& ab : me.abilities()) {
+        if (!ab.is_dash() || !ab.is_ready())
+            continue;
+        cambc::bitboard tiles;
+        try {
+            tiles = ab.valid_tiles();
+        } catch (...) {
+            continue;
+        }
+        if (tiles.is_empty())
+            continue;
+        // Somewhere to land that nothing can reach next turn.
+        auto safe = tiles & ~danger;
+        if (safe.is_empty())
+            return false; // no escape: do not burn the cooldown for nothing
+        auto opts = safe.positions();
+        // Farthest from the nearest threat is the best run.
+        auto best = opts[0];
+        int best_score = -1;
+        for (auto tile : opts) {
+            int score = 1 << 20;
+            for (const auto& camp : cambc::vision::camps()) {
+                if (camp.health() <= 0)
+                    continue;
+                score = std::min(score, distance(tile, camp.position()));
+            }
+            for (const auto& enemy : cambc::vision::champions(team::enemy)) {
+                if (!enemy.is_visible() || enemy.health() <= 0)
+                    continue;
+                score = std::min(score, distance(tile, enemy.position()));
+            }
+            if (score > best_score) {
+                best_score = score;
+                best = tile;
+            }
+        }
+        try {
+            return ab.use(best);
+        } catch (...) {
+            return false;
+        }
+    }
+    return false;
+}
+
 cambc::bitboard Bot::farm_goal(bool& committed) {
     const auto visible = cambc::vision::visible_tiles();
     const auto& groups = cambc::map::camp_groups();
@@ -431,6 +563,7 @@ void Bot::play_turn() {
 
     // Publish danger for team-mates before acting on anything.
     update_signal();
+    maybe_place_ward();
 
     if (!me.is_alive() || me.is_recalling() || me.is_submitting_gems() || me.is_teleporting()
         || (!me.can_move() && !me.can_attack()))
@@ -457,10 +590,13 @@ void Bot::play_turn() {
     if (!at_spawn) {
         const float bail = me.gem_count() > 0 ? 0.5f : 0.3f;
         if (me.health() < me.max_health() * bail) {
-            if (under_threat())
-                move_towards_closest(cambc::map::spawn_region(team::ally));
-            else
+            if (under_threat()) {
+                // Two free tiles first if this champion has a dash.
+                if (!dash_escape())
+                    move_towards_closest(cambc::map::spawn_region(team::ally));
+            } else {
                 me.recall();
+            }
             return;
         }
     }

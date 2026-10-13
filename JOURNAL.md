@@ -388,3 +388,31 @@ over the bytes; readers discard pings older than 4 rounds.
   sooner (collision round 666, corners 565, interlock 546).
 - Decision: KEEP. Value against a genuinely aggressive opponent is still
   untested locally; the conservative thresholds are the measured part.
+
+## 2026-10-15 — wards, then dash-escape (both KEPT, tested separately)
+
+### Wards
+- One free ward per champion, 6 tiles of permanent vision, placed within 2
+  tiles and replaceable once per round. Vision is NOT shared between allies,
+  so a shared viewpoint is worthless - each champion needs its own camera.
+- The loss CSV had the opponent on 5 active wards from round 2 and us on 0 for
+  the whole match.
+- Placement priority: the altar we are carrying gems to (spots enemy locks
+  before we commit a tribute), else the camp we are working (tells us it
+  respawned without walking over), else the nearest altar. The ward is pushed
+  to the far edge of the placement mask because it outlives us, so distance
+  from our current tile is free range.
+- Verified mechanically, not assumed: instrumented `place_ward` returned true
+  on all 122 attempts in one match (debug print removed afterwards).
+- Result: 9W-0L maintained, and faster on most maps (corners r565 -> r416,
+  rows r932 -> r801, packs 1004 -> 1044).
+
+### Dash-escape
+- Vendetta, Vesper Vale, Ren and Issac carry a two-tile dash on an 8-turn
+  cooldown. Used only while fleeing: builds the danger mask from live camps and
+  enemies, then dashes to the reachable tile that maximises distance from the
+  nearest threat. Burns the cooldown only if a genuinely safe tile exists.
+- Wired ahead of walking towards spawn in the survival block.
+- Result: 9W-0L maintained and faster again (collision r690 -> r641, corners
+  r416 -> r405, monolith r977 -> r821, interlock 1 death -> 0 and 1046 gems).
+  Deaths across the round-robin 9 -> 7.

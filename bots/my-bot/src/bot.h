@@ -17,6 +17,8 @@ class Bot {
     void submit_if_at_altar();
     void update_signal();
     bool should_help();
+    void maybe_place_ward();
+    bool dash_escape();
     void farm_camps(bool engage_shooter);
 
 public:
