@@ -20,6 +20,17 @@ bool is_self(const cambc::champion& other) {
         == static_cast<cambc::handle_champion_t>(cambc::self());
 }
 
+// Run an engine action; a rejected action (e.g. an illegal cast or a race with a
+// teammate) must not abort the rest of the turn, so report failure instead.
+template <class F>
+bool safely(F&& action) {
+    try {
+        return action();
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 // Claim partition (from the Khaos postmortem): a tile belongs to whichever
 // living ally is closest, so teammates spread out instead of clumping.
 bool claims(vec2 goal) {
@@ -65,7 +76,7 @@ bool move_towards_closest(cambc::bitboard goals) {
     if (goals.is_empty())
         return false;
     if (goals.count() == 1 && !blocked.is_set(goals.positions()[0]))
-        return me.move_towards(goals.positions()[0]);
+        return safely([&] { return me.move_towards(goals.positions()[0]); });
 
     // Expand from the goals until our current tile is reached.
     const auto path_walls = blocked & ~goals;
@@ -78,14 +89,14 @@ bool move_towards_closest(cambc::bitboard goals) {
     for (auto tile : blocked.reachable_tiles(step, me.base_stats().base_move_speed).positions())
         if (field.get(tile) < field.get(step)) step = tile;
     if (step != me.position())
-        return me.move_absolute(step);
+        return safely([&] { return me.move_absolute(step); });
 
     // Local minimum (e.g. a goal boxed in by terrain): nudge greedily toward the
     // nearest goal rather than idling in place for the rest of the game.
     vec2 nearest = goals.positions()[0];
     for (auto tile : goals.positions())
         if (field.get(tile) < field.get(nearest)) nearest = tile;
-    return me.move_towards(nearest);
+    return safely([&] { return me.move_towards(nearest); });
 }
 
 void Bot::buy_items() {
@@ -105,8 +116,7 @@ bool attack_if_in_range(const Target& target) {
         || !me.attack_tiles().is_set(target.position())) {
         return false;
     }
-    me.attack(target);
-    return true;
+    return safely([&] { me.attack(target); return true; });
 }
 
 // Cast the first ready attack-reset so we can swing our basic attack again.
@@ -115,7 +125,7 @@ bool use_attack_reset() {
     if (!me.can_cast()) return false;
     for (auto& ability : me.abilities())
         if (ability.is_ready() && ability.is_attack_reset() && ability.can_target_self())
-            return ability.use();
+            return safely([&] { return ability.use(); });
     return false;
 }
 
@@ -125,29 +135,30 @@ bool cast_offensive_ability() {
     if (!me.can_cast()) return false;
     auto abilities = me.abilities();
     for (auto& ability : abilities) {
-        if (!ability.is_ready()) continue;
+        if (!safely([&] { return ability.is_ready(); })) continue;
         if (!ability.is_damage() && !ability.is_aoe_damage() && !ability.is_cc()) continue;
-        if (ability.can_target_camps() || ability.can_target_enemies()) {
-            if (ability.can_target_camps())
-                for (const auto& target : cambc::vision::camps())
-                    if (target.health() > 0 && ability.valid_tiles().is_set(target.position())
-                        && ability.use(target))
-                        return true;
-            if (ability.can_target_enemies())
-                for (const auto& target : cambc::vision::champions(team::enemy))
-                    if (target.is_visible() && target.health() > 0
-                        && ability.valid_tiles().is_set(target.position()) && ability.use(target))
-                        return true;
-        }
+        const auto in_range = [&](vec2 tile) { return ability.valid_tiles().is_set(tile); };
+        if (ability.can_target_camps())
+            for (const auto& target : cambc::vision::camps())
+                if (target.health() > 0 && in_range(target.position())
+                    && safely([&] { return ability.use(target); }))
+                    return true;
+        if (ability.can_target_enemies())
+            for (const auto& target : cambc::vision::champions(team::enemy))
+                if (target.is_visible() && target.health() > 0
+                    && in_range(target.position())
+                    && safely([&] { return ability.use(target); }))
+                    return true;
         // Ground-targeted area effects land on one tile and splash its neighbours.
         if (ability.can_target_ground()) {
             for (const auto& target : cambc::vision::camps())
-                if (target.health() > 0 && ability.valid_tiles().is_set(target.position())
-                    && ability.use(target.position()))
+                if (target.health() > 0 && in_range(target.position())
+                    && safely([&] { return ability.use(target.position()); }))
                     return true;
             for (const auto& target : cambc::vision::champions(team::enemy))
                 if (target.is_visible() && target.health() > 0
-                    && ability.valid_tiles().is_set(target.position()) && ability.use(target.position()))
+                    && in_range(target.position())
+                    && safely([&] { return ability.use(target.position()); }))
                     return true;
         }
     }
@@ -159,16 +170,15 @@ bool cast_defensive_ability() {
     auto& me = cambc::self();
     if (!me.can_cast()) return false;
     for (auto& ability : me.abilities()) {
-        if (!ability.is_ready()) continue;
+        if (!safely([&] { return ability.is_ready(); })) continue;
         if (!ability.is_heal() && !ability.is_shield()) continue;
-        if (ability.can_target_self()) {
-            ability.use();
+        if (ability.can_target_self() && safely([&] { return ability.use(); }))
             return true;
-        }
         if (ability.can_target_allies()) {
             for (const auto& ally : cambc::vision::champions(team::ally))
                 if (ally.is_visible() && ally.health() > 0 && ally.health() < ally.max_health() * 0.6f
-                    && ability.valid_tiles().is_set(ally.position()) && ability.use(ally))
+                    && ability.valid_tiles().is_set(ally.position())
+                    && safely([&] { return ability.use(ally); }))
                     return true;
         }
     }
@@ -217,9 +227,9 @@ void farm_camps(bool engage_shooter) {
         }
     }
 
-    // Fresh vision after movement may reveal a camp already in range.
+    // Fresh vision after movement may reveal a camp already in range. Some
+    // spells cannot be cast after normal movement, so only swing here.
     if (move_towards_closest(goals)) {
-        cast_offensive_ability();
         attack_camps();
     }
 }
