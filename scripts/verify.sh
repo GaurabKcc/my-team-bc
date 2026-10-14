@@ -37,20 +37,23 @@ n=${#BOTS[@]}
 declare -A WINS LOSSES
 for b in "${BOTS[@]}"; do WINS[$b]=0; LOSSES[$b]=0; done
 
-echo "map: $MAP"
+echo "map: $MAP (each pair plays both sides: team side decides games)"
 for ((i=0;i<n;i++)); do
   for ((j=i+1;j<n;j++)); do
-    a=${BOTS[$i]}; b=${BOTS[$j]}
-    out=$(timeout 400 cambc run "$a" "$b" --map "$MAP" 2>&1)
-    win=$(echo "$out" | grep -oE "teamA|teamB" | head -n1)
-    sa=$(echo "$out" | grep -E "^  A " | head -n1 | awk '{print "gems="$3" kills="$4" deaths="$5}')
-    sb=$(echo "$out" | grep -E "^  B " | head -n1 | awk '{print "gems="$3" kills="$4" deaths="$5}')
-    if [ "$win" = "teamA" ]; then
-      WINS[$a]=$(( ${WINS[$a]} + 1 )); LOSSES[$b]=$(( ${LOSSES[$b]} + 1 ))
-    else
-      WINS[$b]=$(( ${WINS[$b]} + 1 )); LOSSES[$a]=$(( ${LOSSES[$a]} + 1 ))
-    fi
-    echo "  $a vs $b -> $win | $a[$sa]  $b[$sb]"
+    for order in "$i $j" "$j $i"; do
+      set -- $order
+      a=${BOTS[$1]}; b=${BOTS[$2]}
+      out=$(timeout 400 cambc run "$a" "$b" --map "$MAP" 2>&1)
+      win=$(echo "$out" | grep -oE "teamA|teamB" | head -n1)
+      sa=$(echo "$out" | grep -E "^  A " | head -n1 | awk '{print "gems="$3" kills="$4" deaths="$5}')
+      sb=$(echo "$out" | grep -E "^  B " | head -n1 | awk '{print "gems="$3" kills="$4" deaths="$5}')
+      if [ "$win" = "teamA" ]; then
+        WINS[$a]=$(( ${WINS[$a]} + 1 )); LOSSES[$b]=$(( ${LOSSES[$b]} + 1 ))
+      else
+        WINS[$b]=$(( ${WINS[$b]} + 1 )); LOSSES[$a]=$(( ${LOSSES[$a]} + 1 ))
+      fi
+      echo "  $a vs $b -> $win | $a[$sa]  $b[$sb]"
+    done
   done
 done
 

@@ -740,3 +740,30 @@ Next: run this against a fighting opponent (scripts/tally.sh comparison) and
 see whether the straggler pattern holds there, and whether it is the same
 champion role each time. If so the fix is routing for that role, not global
 tuning.
+
+
+## 2026-10-15 — the new build was never losing: Team B wins this matchup
+
+The head-to-head new-vs-old came back 220-1040 three times identically, and I
+bisected the instrumentation looking for a fuel bug: emblem check 25 -> 100
+(no change), gold_count check disabled entirely (no change). Neither moved the
+tape a single gem, which should have ruled fuel out - but I kept digging in
+the code instead of questioning the experiment.
+
+The experiment was confounded: in all three runs the new build was Team A.
+Swapped sides (old as A, new as B) and the new build wins 1040-220 with the
+exact mirror scoreline - same round (560), same deaths (6 vs 0, swapped),
+same drafts. Identical code, identical tape, winner determined by side.
+
+- The EARLY instrumentation is exonerated. All 4 champions report, zero
+  errors, zero crashes, behavior identical to the old model.
+- The emblem sampling stays at every 100 rounds (was 25): same data for
+  opening-speed analysis at a quarter of the cost.
+- scripts/verify.sh now plays every pair in BOTH orders. It previously played
+  each pair once with my-bot always Team B, so the 4-0 league record - and
+  every league record before it - is partly a side artifact. The PvP harness
+  has the mirror problem: my-bot is always Team A there.
+- Process rule, stated plainly so it is not repeated a third time: a loss
+  means nothing until the same code wins from the other side. Swapping sides
+  is nearly free (one more match) and would have saved three rounds of
+  bisecting the wrong suspect. Run mirrored pairs by default from here on.

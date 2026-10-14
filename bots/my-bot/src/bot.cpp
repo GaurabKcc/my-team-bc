@@ -214,10 +214,13 @@ void Bot::play_turn() {
         return;
 
     // Opening-speed timing: gold only arrives via captures, so first gold is
-    // first capture. Emblem check runs every 25 rounds to keep it cheap.
+    // first capture. Emblem check runs every 100 rounds: the full
+    // item_count() copy every 25 rounds was cheap per-turn but fired for all
+    // champions on the same round, and sampling finer than 100 buys nothing
+    // for opening-speed analysis.
     if (first_gold_round == 0 && me.gold_count() > 0)
         first_gold_round = cambc::round_number();
-    if (first_emblem_round == 0 && cambc::round_number() % 25 == 0) {
+    if (first_emblem_round == 0 && cambc::round_number() % 100 == 0) {
         const auto inv = me.item_count();
         static const cambc::item_type kEmblems[] = {
             cambc::item_type::monster_emblem_of_strength,
