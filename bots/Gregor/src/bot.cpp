@@ -110,19 +110,23 @@ void Bot::buy_items() {
 
 // Make one basic attack if the target is already in attack range.
 template<class Target>
-bool attack_if_in_range(const Target& target) {
+bool attack_if_in_range(const Target& target, bool* attack_spent_flag = nullptr) {
     auto& me = cambc::self();
     if (!me.can_attack() || !target.is_visible() || target.health() <= 0
         || !me.attack_tiles().is_set(target.position())) {
         return false;
     }
-    return safely([&] { me.attack(target); return true; });
+    if (safely([&] { me.attack(target); return true; })) {
+        if (attack_spent_flag) *attack_spent_flag = true;
+        return true;
+    }
+    return false;
 }
 
 // Cast the first ready attack-reset so we can swing our basic attack again.
-bool use_attack_reset() {
+bool use_attack_reset(bool attack_spent) {
     auto& me = cambc::self();
-    if (!me.can_cast()) return false;
+    if (!attack_spent || !me.can_cast()) return false;
     for (auto& ability : me.abilities())
         if (ability.is_ready() && ability.is_attack_reset() && ability.can_target_self())
             return safely([&] { return ability.use(); });
@@ -130,17 +134,22 @@ bool use_attack_reset() {
 }
 
 // Cast the first ready damage/area/cc ability onto an in-range camp or enemy.
-bool cast_offensive_ability() {
+bool cast_offensive_ability(bool did_move) {
     auto& me = cambc::self();
     if (!me.can_cast()) return false;
     auto abilities = me.abilities();
     for (auto& ability : abilities) {
         if (!safely([&] { return ability.is_ready(); })) continue;
+        // If we've moved this turn, cannot cast abilities that are exclusive with movement
+        if (did_move) {
+            const bool excl = ability.info() && std::visit([](auto&& v){ return v.exclusive_with_movement; }, *ability.info());
+            if (excl) continue;
+        }
         if (!ability.is_damage() && !ability.is_aoe_damage() && !ability.is_cc()) continue;
         const auto in_range = [&](vec2 tile) { return ability.valid_tiles().is_set(tile); };
         if (ability.can_target_camps())
             for (const auto& target : cambc::vision::camps())
-                if (target.health() > 0 && in_range(target.position())
+                if (target.health() > 0 && target.is_visible() && in_range(target.position())
                     && safely([&] { return ability.use(target); }))
                     return true;
         if (ability.can_target_enemies())
@@ -152,7 +161,7 @@ bool cast_offensive_ability() {
         // Ground-targeted area effects land on one tile and splash its neighbours.
         if (ability.can_target_ground()) {
             for (const auto& target : cambc::vision::camps())
-                if (target.health() > 0 && in_range(target.position())
+                if (target.health() > 0 && target.is_visible() && in_range(target.position())
                     && safely([&] { return ability.use(target.position()); }))
                     return true;
             for (const auto& target : cambc::vision::champions(team::enemy))
@@ -166,11 +175,15 @@ bool cast_offensive_ability() {
 }
 
 // Cast a ready heal or shield on ourselves or a hurt nearby ally.
-bool cast_defensive_ability() {
+bool cast_defensive_ability(bool did_move = false) {
     auto& me = cambc::self();
     if (!me.can_cast()) return false;
     for (auto& ability : me.abilities()) {
         if (!safely([&] { return ability.is_ready(); })) continue;
+        if (did_move) {
+            const bool excl = ability.info() && std::visit([](auto&& v){ return v.exclusive_with_movement; }, *ability.info());
+            if (excl) continue;
+        }
         if (!ability.is_heal() && !ability.is_shield()) continue;
         if (ability.can_target_self() && safely([&] { return ability.use(); }))
             return true;
@@ -186,12 +199,12 @@ bool cast_defensive_ability() {
 }
 
 // Swing at a camp and cash in an attack-reset for a second swing the same turn.
-bool attack_camps() {
+bool attack_camps(bool attack_spent, bool& attack_spent_out) {
     for (const auto& camp : cambc::vision::camps())
-        if (attack_if_in_range(camp)) {
-            if (use_attack_reset())
-                for (const auto& again : cambc::vision::camps())
-                    if (attack_if_in_range(again)) break;
+        if (camp.health() > 0 && camp.is_visible() && attack_if_in_range(camp, &attack_spent_out)) {
+            if (use_attack_reset(attack_spent_out))
+                for (const auto& camp2 : cambc::vision::camps())
+                    if (camp2.health() > 0 && camp2.is_visible() && attack_if_in_range(camp2, &attack_spent_out)) break;
             return true;
         }
     return false;
@@ -199,10 +212,11 @@ bool attack_camps() {
 
 // Attack a camp already in range, otherwise move onto a claimed camp region.
 // When being shot from out of range, close in on the visible camp instead.
-void farm_camps(bool engage_shooter) {
-    cast_offensive_ability();
+void farm_camps(bool engage_shooter, bool did_move_in, bool& attack_spent_out) {
+    // Try casting before moving; if we have not moved, we can cast exclusive abilities
+    cast_offensive_ability(did_move_in);
 
-    if (attack_camps())
+    if (attack_camps(did_move_in || attack_spent_out, attack_spent_out))
         return;
 
     cambc::bitboard goals;
@@ -211,7 +225,7 @@ void farm_camps(bool engage_shooter) {
     if (engage_shooter) {
         const int range = cambc::self().attack_range();
         for (const auto& camp : cambc::vision::camps())
-            if (camp.health() > 0)
+            if (camp.health() > 0 && camp.is_visible())
                 goals |= tiles_around(camp.position(), range);
     }
 
@@ -229,8 +243,9 @@ void farm_camps(bool engage_shooter) {
 
     // Fresh vision after movement may reveal a camp already in range. Some
     // spells cannot be cast after normal movement, so only swing here.
-    if (move_towards_closest(goals)) {
-        attack_camps();
+    const auto moved_now = move_towards_closest(goals);
+    if (moved_now) {
+        attack_camps(true, attack_spent_out);
     }
 }
 
@@ -243,7 +258,10 @@ void Bot::play_turn() {
         // win trades. Larger drafts are attrition fights where health shards keep
         // champions alive long enough to bank their gems.
         chosen_stat = cambc::draft::team_size() <= 3 ? 0 : 2;
-        std::cout << "draft: " << std::string(reinterpret_cast<const char*>(cambc::draft_memory.data()), 11) << '\n';
+        const auto dm = cambc::draft_memory;
+        std::string draftstr(reinterpret_cast<const char*>(dm.data()), dm.size());
+        if (draftstr.length() > 120) draftstr = draftstr.substr(0, 120);
+        std::cout << "draft: " << draftstr << '\n';
     }
 
     // Read before writing: little-endian u32 at shared-memory byte offset zero.
@@ -256,9 +274,26 @@ void Bot::play_turn() {
     auto& me = cambc::self();
 
     // Leave channels running and skip turns where we cannot act.
-    if (!me.is_alive() || me.is_recalling() || me.is_submitting_gems() || me.is_teleporting()
-        || (!me.can_move() && !me.can_attack()))
+    if (!me.is_alive()) {
+        // If we just died this turn (state change) - log once when going to dead? Hard to detect without tracking last state.
         return;
+    }
+    if (me.is_recalling() || me.is_submitting_gems() || me.is_teleporting() || (!me.can_move() && !me.can_attack()))
+        return;
+
+    // Compact logging: log only when state changes (health band or gems change)
+    {
+        const float h = me.health();
+        const int g = me.gem_count();
+        if (std::abs(h - last_log_health) > 0.1f || g != last_log_gems) {
+            last_log_health = h;
+            last_log_gems = g;
+            // simple state marker - just record basic state
+            std::cout << "r=" << cambc::round_number() << " cid=" << static_cast<std::uint32_t>(static_cast<cambc::handle_champion_t>(me))
+                      << " hp=" << static_cast<int>(h) << "/" << static_cast<int>(me.max_health())
+                      << " gems=" << g << '\n';
+        }
+    }
 
     // Remember progress: losing health since last turn means something is hitting us.
     const bool took_damage = has_memory && me.health() < last_health;
@@ -282,11 +317,15 @@ void Bot::play_turn() {
         cast_defensive_ability();
 
     // Brawl: swing at an adjacent enemy and cash an attack-reset for a second swing.
+    did_attack = false;
+    attack_spent = false;
+    did_move = false;
     for (const auto& enemy : cambc::vision::champions(team::enemy))
-        if (attack_if_in_range(enemy)) {
-            if (use_attack_reset())
+        if (enemy.is_visible() && attack_if_in_range(enemy, &attack_spent)) {
+            did_attack = true;
+            if (use_attack_reset(attack_spent))
                 for (const auto& again : cambc::vision::champions(team::enemy))
-                    if (attack_if_in_range(again)) break;
+                    if (again.is_visible() && attack_if_in_range(again, &attack_spent)) break;
             return;
         }
 
@@ -299,16 +338,18 @@ void Bot::play_turn() {
             if (distance(me.position(), altar) <= cambc::constants::submit_gems_range
                 && !cambc::vision::has_altar_lock(altar)) {
                     me.submit_gems(altar);
+                    std::cout << "r=" << cambc::round_number() << " cid=" << static_cast<std::uint32_t>(static_cast<cambc::handle_champion_t>(me)) << " tribute start, gems=" << me.gem_count() << '\n';
                     return;
                 }
             if (!cambc::vision::has_altar_lock(altar)) goals |= tiles_around(altar, cambc::constants::submit_gems_range);
         }
-        move_towards_closest(goals);
+        const bool moved = move_towards_closest(goals);
+        did_move = moved;
         return;
     }
 
     // Only chase a distant shooter when already hurt enough to matter.
-    farm_camps(took_damage);
+    farm_camps(took_damage, did_move, attack_spent);
 
     // Per-champion priority spreads within-team turn order; seed comes from our
     // spawn tile so it is stable for a given champion.

@@ -12,6 +12,16 @@ class Bot {
     int stuck_turns = 0;
     bool has_memory = false;
 
+    // Turn state to enforce move/cast/attack ordering rules
+    bool did_move = false;
+    bool did_attack = false;
+    bool attack_spent = false;
+
+    // Compact logging state
+    int last_gems = -1;
+    float last_log_health = 0.0f;
+    int last_log_gems = -1;
+
     // Spend on power shards of the chosen stat, keeping some health for survival.
     void buy_items();
 
