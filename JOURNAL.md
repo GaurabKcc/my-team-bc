@@ -660,3 +660,59 @@ Side by side on collision against the same opponent:
 **Root cause of remaining gap:** We clear 58% of their monster damage but convert only 33% of their gems. Every "capture efficiency" fix regressed farming. The bottleneck is structural: we need per-champion stat/level data at combat time to diagnose whether the gap is in clear speed, capture holding, or gold spending.
 
 **Verdict:** Current build is the strongest measured version. Submit `my-bot.zip` to ladder for real PvP data. Next diagnostic step: run `scripts/tally.sh` on ladder matches to isolate whether the farming gap is in clear speed, capture holding, or gold spending.
+
+
+## 2026-10-15 — Capture-hold experiment refuted; no further gains
+
+- Tried: capture-hold priority (stand on cleared camp for 5 rounds)
+- Result: league 4-0 -> 3-1, monster damage 40,742 -> 23,331, gold 2,565 -> 1,765
+- Cause: holding a capture costs turns; the farming throughput loss exceeds the capture value
+- Reverted. Capture ratio gap (58% damage → 33% gems) remains unexplained.
+
+### Summary of all PvP experiments on e0051d0 base
+
+| Change | PvP record | Kept? |
+|---|---|---|
+| Base (enemy-first) | 4-5 | ✓ |
+| + Monster shards | 3-6 | ✗ |
+- Treasure shards | 2-7 | ✗ |
+- Capture-hold priority | 3-6 | ✗ |
+- Value-weighted camp selection | 0-4 | ✗
+- Camps-first ability targeting | 3-6 | ✗ |
+- Recall-first survival | 3-6 | ✗
+- Dash-escape disabled | 2-7 | ✗ |
+- Help-out disabled | 1-7 | ✗ |
+- Wards disabled | 1-8 | ✗ |
+- Brawl gate (no dive) | 1-8 | ✗ |
+- Recall-first survival | 3-6 | ✗ |
+
+**Key finding:** every "fight less / hold more / be clever" change made us lose more.
+The damage asymmetry (13,888 dealt vs 13,504 taken) is now nearly even, but monster damage
+remains 58% of hist-surv. The gap is structural, not tactical.
+
+### Remaining gap diagnosis
+
+| Metric | Ours | hist-surv | Ratio |
+|---|---|---|---|
+| Monster damage | 40,742 | 70,622 | 58% |
+| Champion damage | 13,888 | 14,617 | 95% |
+| Deaths | 7 | 6 | ~even |
+| Gold earned | 2,565 | 5,120 | 50% |
+| Gems submitted | 330 | 1,012 | 33% |
+
+We clear 58% of their monster damage but bank only 33% of their gems.
+Every "capture efficiency" fix we tried **reduced** monster damage without improving
+conversion. The gap is structural: we clear camps slower, so we trigger fewer captures.
+
+**What IS proven:**
+- Reset to e0051d0 base (survival pass): deaths 19→7 ✓
+- Enemy-first ability targeting: +56% champion damage ✓
+- Farm target re-pick (no commitment): +29% monster damage ✓
+- Power shards over Monster/Treasure: PvP 3-6→4-5 ✓
+- Exception guards on move/attack/reset: 25 ladder errors eliminated ✓
+- Wave banking (30-gem threshold): held neutral (4-5) ✓
+- Enemy-first ability targeting: +56% champion damage ✓
+- 2-pack split with C&I tether: league 4-0 ✓
+
+**Next step if continuing:** submit current `my-bot.zip` to ladder for real opponent data.
+The `scripts/tally.sh` harness is ready to diagnose the capture-efficiency gap on real opponents.
