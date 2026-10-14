@@ -231,7 +231,9 @@ champion_draft choose_next(const MapFeatures& f,
         if (can_complete(after, pool_after, f.team_size))
             allowed.push_back(c);
     }
-    const std::vector<champion_draft>& candidates = allowed.empty() ? remaining : allowed;
+    // DIAG: coverage gate bypassed to test whether forced role picks lose
+    // the hist-monster-as-A fixture (guessing coverage forces weak clearers).
+    const std::vector<champion_draft>& candidates = remaining;
     champion_draft best = candidates[0];
     int best_score = score(best, f, picks_so_far, enemy_has_pair);
     for (std::size_t i = 1; i < candidates.size(); ++i) {
@@ -312,7 +314,7 @@ void play_draft() {
     const bool enemy_has_pair =
         std::find(enemy.begin(), enemy.end(), champion_draft::cassi_and_issac) != enemy.end();
 
-    const auto pick = choose_next(features, chosen, enemy_has_pair);
+    auto pick = choose_next(features, chosen, enemy_has_pair);
 
     auto picks = chosen;
     picks.push_back(pick);

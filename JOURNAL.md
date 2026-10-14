@@ -944,3 +944,34 @@ carrier preference, packs (tail carries the byte, unused), value scoring.
 - Decision: KEEP. Next candidates in order: carrier-priority brawl (video
   evidence: winner's score jumps where its kills land), then wards (ladder
   CSVs show opponents holding 2-6 to our 0).
+
+
+## 2026-10-15 — pick order decides games: the one-match gap, dug up
+
+The mirrored league had my-bot 5-3 against hist-surv's 6-2 with everything
+else tied. Full per-match table showed the entire gap is ONE fixture:
+hist-surv beats hist-monster as Team A (1012-814) while we lose it as Team A
+(792-1012). Same map, same side, nearly identical code.
+
+Ruled out, each with a direct test on that fixture:
+- Sectors (assigned spread vs nearest-first): no change when disabled.
+- Role-coverage draft gate: no change when bypassed; draft came out identical.
+
+Found it by comparing drafts: we pick Cassi & Issac first, they pick Varg
+first - same champion SET, different ORDER. Forced our first pick to Varg
+(diagnostic hack, one match): we flip to a 1012-814 WIN with 2 deaths instead
+of 8. Reverted the hack: back to the 792-1012 loss with identical numbers.
+Causation confirmed in both directions.
+
+Mechanism (best understanding): spawn tile assignment follows pick order, so
+order changes starting positions and the whole game unfolds differently.
+Not proven at the SDK level, but nothing else differs - match code paths are
+identical, drafts are the same set, engine is deterministic.
+
+Implications:
+1. Draft ORDER is a strategic lever, not cosmetic. Every draft experiment so
+   far only varied the SET. A deliberate order policy (e.g. melee/tank first
+   for forward spawns) is now the top draft item, above counter-drafting.
+2. All historical draft comparisons are confounded by order. Any two runs
+   whose pick orders differ are not directly comparable on score alone.
+3. Sectors are back on (the disable was diagnostic only).
