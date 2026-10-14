@@ -15,6 +15,10 @@ class Bot {
     // camp group so the team spreads instead of converging on one camp.
     bool assignment_read = false;
     int my_group = -1;
+    // Pack from the draft plan (0 or 1). Packmates share one camp group, so
+    // the pack converges for fast clears while the two packs work in
+    // parallel. -1 until read_assignment() runs.
+    int my_pack = -1;
 
     bool read_assignment();
     cambc::bitboard assigned_target();

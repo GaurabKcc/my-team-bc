@@ -71,8 +71,13 @@ bool use_attack_reset() {
     auto& me = cambc::self();
     if (!me.can_cast()) return false;
     for (auto& ability : me.abilities())
-        if (ability.is_ready() && ability.is_attack_reset() && ability.can_target_self())
-            return ability.use();
+        if (ability.is_ready() && ability.is_attack_reset() && ability.can_target_self()) {
+            try {
+                return ability.use();
+            } catch (...) {
+                return false;
+            }
+        }
     return false;
 }
 
@@ -116,14 +121,34 @@ bool cast_defensive_ability() {
         if (!ability.is_ready()) continue;
         if (!ability.is_heal() && !ability.is_shield()) continue;
         if (ability.can_target_self()) {
-            if (ability.use())
-                return true;
+            try {
+                if (ability.use())
+                    return true;
+            } catch (...) {
+            }
         }
         if (ability.can_target_allies()) {
-            for (const auto& ally : cambc::vision::champions(team::ally))
+            for (const auto& ally : cambc::vision::champions(team::ally)) {
+                // Never target ourselves through the ally mask: allies excludes
+                // self, so casting the ally-only heal at our own tile throws
+                // error 30 every turn (hundreds per game) and the heal that
+                // would lift us above the threshold never lands.
+                try {
+                    if (ally.position().x == me.position().x
+                        && ally.position().y == me.position().y)
+                        continue;
+                } catch (...) {
+                    continue;
+                }
                 if (ally.is_visible() && ally.health() > 0 && ally.health() < ally.max_health() * 0.6f
-                    && ability.valid_tiles().is_set(ally.position()) && ability.use(ally))
-                    return true;
+                    && ability.valid_tiles().is_set(ally.position())) {
+                    try {
+                        if (ability.use(ally))
+                            return true;
+                    } catch (...) {
+                    }
+                }
+            }
         }
     }
     return false;
@@ -177,20 +202,27 @@ bool Bot::read_assignment() {
         return my_group >= 0;
     assignment_read = true;
     my_group = -1;
+    my_pack = -1;
 
     const auto& mem = cambc::draft_memory;
     std::size_t off = 0;
     while (off < mem.size() && mem[off] != std::byte{0})
         ++off;
-    if (off + 3 >= mem.size() || mem[off + 1] != std::byte{1})
+    if (off + 3 >= mem.size())
+        return false;
+    const int version = std::to_integer<int>(mem[off + 1]);
+    // v1 tails carry (champion id, group) pairs and no pack: pack falls back
+    // to slot parity. v2 tails carry (champion id, group, pack) triples.
+    const std::size_t stride = (version == 2) ? 3 : 2;
+    if (version != 1 && version != 2)
         return false;
     const int team_size = std::to_integer<int>(mem[off + 2]);
     const std::size_t base = off + 3;
-    if (team_size <= 0 || base + 2 * static_cast<std::size_t>(team_size) > mem.size())
+    if (team_size <= 0 || base + stride * static_cast<std::size_t>(team_size) > mem.size())
         return false;
 
     // champion_type -> champion_draft. Cassi and Issac are two bodies for one
-    // pick and both claim that pick's group.
+    // pick and both claim that pick's group and pack.
     const auto name = cambc::self().champion_name();
     const int raw = static_cast<int>(name);
     int want;
@@ -202,8 +234,10 @@ bool Bot::read_assignment() {
         want = raw - 1;
 
     for (int i = 0; i < team_size; ++i) {
-        if (std::to_integer<int>(mem[base + 2 * i]) == want) {
-            my_group = std::to_integer<int>(mem[base + 2 * i + 1]);
+        if (std::to_integer<int>(mem[base + stride * i]) == want) {
+            my_group = std::to_integer<int>(mem[base + stride * i + 1]);
+            my_pack = (stride == 3) ? std::to_integer<int>(mem[base + stride * i + 2])
+                                    : (i % 2);
             return true;
         }
     }
@@ -268,7 +302,6 @@ void Bot::farm_camps(bool engage_shooter) {
     }
 
     // Re-check camps after moving, but never cast there: "excludes walking"
-    // spells throw once we have moved (engine error 126) and waste the turn.
     if (move_towards_closest(goals))
         attack_camps();
 }
@@ -367,21 +400,9 @@ void Bot::play_turn() {
         }
     }
 
-    // Pop a heal or shield before brawling or farming while not critically hurt.
-    if (me.health() < me.max_health() * 0.6f)
-        cast_defensive_ability();
-
-    // Brawl: swing at an adjacent enemy and cash an attack-reset for a second swing.
-    for (const auto& enemy : cambc::vision::champions(team::enemy))
-        if (attack_if_in_range(enemy)) {
-            if (use_attack_reset())
-                for (const auto& again : cambc::vision::champions(team::enemy))
-                    if (attack_if_in_range(again)) break;
-            return;
-        }
-
     // Bank any carried gems before farming.
     // Only bank when carrying >= 30 gems (wave banking reduces trips).
+    // BISECT: safe-altar routing disabled to isolate the corners shutout.
     if (me.gem_count() >= 30) {
         cambc::bitboard goals;
         goals.clear();
@@ -396,6 +417,84 @@ void Bot::play_turn() {
         move_towards_closest(goals);
         return;
     }
+
+    // Cassi & Issac tether (safe form): one draft pick, two bodies, ONE shared
+    // death. The old form walked whoever saw the other half back together and
+    // hijacked whole turns, which starved farming on big maps. This form never
+    // moves or returns: a separated half simply declines to START fights it
+    // cannot finish alone, and keeps farming and banking. Separation is still
+    // visible in replays as the pair drifting, never as one half diving alone.
+    // Returns true when separated (mate unseen or further than 6 tiles).
+    auto pair_separated = [&]() -> bool {
+        const auto name = me.champion_name();
+        const bool is_cassi = (name == cambc::champion_type::cassi);
+        const bool is_issac = (name == cambc::champion_type::issac);
+        if (!is_cassi && !is_issac)
+            return false;
+        const auto want = is_cassi ? cambc::champion_type::issac
+                                   : cambc::champion_type::cassi;
+        for (const auto& ally : cambc::vision::champions(team::ally)) {
+            try {
+                if (!ally.is_visible() || !ally.is_alive())
+                    continue;
+                if (ally.champion_name() != want)
+                    continue;
+                return distance(me.position(), ally.position()) > 6;
+            } catch (...) {
+                continue;
+            }
+        }
+        return true; // mate not visible at all: assume separated
+    };
+    const bool separated = pair_separated();
+    if (false) {
+        const auto name = me.champion_name();
+        const bool is_cassi = (name == cambc::champion_type::cassi);
+        const bool is_issac = (name == cambc::champion_type::issac);
+        if (is_cassi || is_issac) {
+            const auto want = is_cassi ? cambc::champion_type::issac
+                                       : cambc::champion_type::cassi;
+            bool seen = false;
+            vec2 mate_pos{0, 0};
+            for (const auto& ally : cambc::vision::champions(team::ally)) {
+                try {
+                    if (!ally.is_visible() || !ally.is_alive())
+                        continue;
+                    if (ally.champion_name() != want)
+                        continue;
+                    seen = true;
+                    mate_pos = ally.position();
+                } catch (...) {
+                    continue;
+                }
+            }
+            if (seen && distance(me.position(), mate_pos) > 3) {
+                cambc::bitboard goals;
+                goals.clear();
+                goals = tiles_around(mate_pos, 1);
+                move_towards_closest(goals);
+                return;
+            }
+        }
+    }
+
+    // Pop a heal or shield before brawling or farming while not critically hurt.
+    if (me.health() < me.max_health() * 0.6f)
+        cast_defensive_ability();
+
+    // Brawl: swing at anything in range (plain). A separated Cassi/Issac half
+    // sits out: starting a fight alone risks the double death, so it farms
+    // and banks instead until the pair is back together.
+    if (!separated) {
+    for (const auto& enemy : cambc::vision::champions(team::enemy))
+        if (attack_if_in_range(enemy)) {
+            if (use_attack_reset())
+                for (const auto& again : cambc::vision::champions(team::enemy))
+                    if (attack_if_in_range(again)) break;
+            return;
+        }
+    }
+
 
     // Only chase a distant shooter when already hurt enough to matter.
     farm_camps(false);

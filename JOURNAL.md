@@ -794,3 +794,45 @@ converged, split rewards, and died together.
   remains the open PvP item alongside carrier-priority brawling.
 - Decision: KEEP. The death count is the strongest single signal in this
   session, and spreading matches the best available evidence of top play.
+
+
+## Parallel-agent session: corners shutout root-caused and fixed
+
+Three agents ran at once: one finished the shutout bisection, one verified
+the error-30 mechanism against the SDK, one mined every ladder CSV, log zip
+and the #1-vs-#2 video frames.
+
+### The corners shutout, fully root-caused
+The 0-gem/0-kill/0-death shutout came from safe-altar routing, not from
+sectors, the draft, the tether or carrier preference: couriers walked to a
+farther "safe" altar by chebyshev distance on a maze-like map and never
+arrived. Reverting to plain union-of-all-altars broke it (0 -> 254). The
+earlier bisection had missed this because it only touched draft-side code
+while the bug was match-side.
+
+### Error 30 mechanism, verified against the SDK (Agent 2)
+`invalid_action_spell_cast_bad_target`, ~350 per game: Willow's ally-only
+heal (allies bit, no self bit) cast at OURSELVES through the ally loop,
+because `vision::champions(ally)` includes our own tile and it passes every
+check (visible, alive, <60%, in range). The engine rejects allies-excludes-
+self every turn, the heal never lands, so Willow stays hurt and retries
+forever. Fixed by skipping our own tile in the loop. Errors 343 -> ~2, and
+those remaining are the benign guarded kind (22/97/98).
+Varg cannot produce this signature (self-bit shield) - confirmed clean control.
+
+### Ladder-wide patterns (Agent 3, 8 CSVs + 10 log zips + 14 video frames)
+Top-3 recurring losses: (1) zero wards (7 of 8 files: A at 0 all game while
+B holds 2-6), (2) never banking - captures level but submitted gems trail by
+2-3x, with carried gems stranded, (3) ball-then-wipe - clustered deaths, A
+never leads the kill race at the end (0-0 x3, 0-5, 2-3, 11-21, 1-2). Ladder
+log errors are dominated by error 22 known-occupied (32/40). Video frames
+show blue leading early then stalling 40 rounds with 0 banked while red
+surged - the same conversion failure as our union-of-altars bug.
+
+### Safe C&I tether (user-ordered, kept in soft form)
+The hard tether (walk-to-rejoin, hijack whole turns) contributed to the
+shutout and stays out. In its place: a separated half simply declines to
+START fights, while farming and banking continue. No forced movement, no
+turn hijack, no orbit trap. Corners holds at 1002 with 0 deaths.
+Round-robin 8W-1L (monolith pre-existing), mirrored league 3-5 (one match
+off the 4-4 baseline; the gate costs some fight participation by design).

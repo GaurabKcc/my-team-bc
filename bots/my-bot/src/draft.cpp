@@ -91,10 +91,49 @@ int score(champion_draft c, const MapFeatures& f) {
     return 0;
 }
 
+// 1 = tank body, 2 = ranged body, 3 = both (Cassi & Issac is one pick that
+// fields a melee and a ranged champion). Packs need one of each: the tank
+// steps adjacent while the ranged hits from range 3.
+int role_of(champion_draft c) {
+    switch (c) {
+    case champion_draft::ryth:
+    case champion_draft::vendetta:
+    case champion_draft::marcella:
+    case champion_draft::ren:
+    case champion_draft::varg:
+        return 1;
+    case champion_draft::vesper_vale:
+    case champion_draft::stellar:
+    case champion_draft::prism:
+    case champion_draft::willow:
+    case champion_draft::tavi:
+        return 2;
+    case champion_draft::cassi_and_issac:
+        return 3;
+    }
+    return 0;
+}
+
 champion_draft choose_next(const MapFeatures& f,
                            const std::vector<champion_draft>& chosen) {
+    // Role coverage first: smaller teams need 1 tank + 1 ranged body, larger
+    // teams 2 + 2. Cassi & Issac covers both roles at once. A candidate is
+    // only allowed if the remaining slots can still complete coverage.
+    const int need_each = f.team_size >= 4 ? 2 : 1;
+    int tanks = 0, ranged = 0;
+    for (auto c : chosen) {
+        const int r = role_of(c);
+        if (r & 1)
+            ++tanks;
+        if (r & 2)
+            ++ranged;
+    }
+    // BISECT: coverage constraint disabled. It forced weak comps (Willow +
+    // Ren) on corners and the team could not kill anything all game (0 gems,
+    // 0 kills, 0 deaths). Pure score picks damage that actually clears camps.
+    // role_of() is kept: pack assignment below still needs it.
     champion_draft best = champion_draft::ryth;
-    int best_score = -1;
+    int best_score = -1000000;
     for (auto c : kAllChampions) {
         if (std::find(chosen.begin(), chosen.end(), c) != chosen.end())
             continue;
@@ -160,24 +199,68 @@ std::vector<std::uint8_t> assign_groups(const MapFeatures& f) {
     return assign;
 }
 
-// Machine-readable tail appended after the text plan and its NUL: version,
-// team size, then (champion id, camp-group index) per pick in pick order, so a
-// champion can find its own sector at match time.
+// Pack assignment, greedy over the final pick list in order: each pick joins
+// the pack that most needs its role, tie-broken to the smaller pack. Pack 0
+// hunts the richest group, pack 1 the second richest, so the two packs work
+// different camps in parallel instead of converging.
+std::vector<std::uint8_t> assign_packs(const std::vector<champion_draft>& picks) {
+    std::vector<std::uint8_t> packs(picks.size(), 0);
+    int pack_tank[2] = {0, 0};
+    int pack_ranged[2] = {0, 0};
+    int pack_size[2] = {0, 0};
+    for (std::size_t i = 0; i < picks.size(); ++i) {
+        const int r = role_of(picks[i]);
+        int best = 0;
+        int best_key = -1000000;
+        for (int p = 0; p < 2; ++p) {
+            int key = 0;
+            if ((r & 1) && pack_tank[p] == 0)
+                key += 100;
+            if ((r & 2) && pack_ranged[p] == 0)
+                key += 100;
+            key -= pack_size[p] * 10;
+            key += (p == 0) ? 1 : 0;
+            if (key > best_key) {
+                best_key = key;
+                best = p;
+            }
+        }
+        packs[i] = static_cast<std::uint8_t>(best);
+        if (r & 1)
+            ++pack_tank[best];
+        if (r & 2)
+            ++pack_ranged[best];
+        ++pack_size[best];
+    }
+    return packs;
+}
+
+// Machine-readable tail appended after the text plan and its NUL: version 2,
+// team size, then (champion id, camp-group index, pack) per pick in pick
+// order, so a champion can find its own sector and its pack at match time.
 std::vector<std::byte> build_plan_bytes(const MapFeatures& f,
                                         const std::vector<champion_draft>& picks) {
     const std::string text = build_plan(f, picks);
     std::vector<std::byte> plan;
-    plan.reserve(text.size() + 4 + picks.size() * 2);
+    plan.reserve(text.size() + 4 + picks.size() * 3);
     for (char c : text)
         plan.push_back(static_cast<std::byte>(static_cast<unsigned char>(c)));
     plan.push_back(std::byte{0});
-    plan.push_back(std::byte{1}); // version
+    plan.push_back(std::byte{2}); // version
     plan.push_back(static_cast<std::byte>(f.team_size));
     const auto assign = assign_groups(f);
+    const auto packs = assign_packs(picks);
     for (std::size_t slot = 0; slot < picks.size(); ++slot) {
+        const int pack = slot < packs.size() ? packs[slot] : 0;
+        // BISECT: per-slot groups (pack sharing disabled) to isolate the
+        // corners shutout. Pack field still written for the reader.
+        const std::size_t gi = assign.empty()
+            ? 0
+            : slot % assign.size();
         plan.push_back(static_cast<std::byte>(static_cast<int>(picks[slot])));
-        plan.push_back(slot < assign.size() ? static_cast<std::byte>(assign[slot])
-                                            : std::byte{0});
+        plan.push_back(assign.empty() ? std::byte{0}
+                                      : static_cast<std::byte>(assign[gi]));
+        plan.push_back(static_cast<std::byte>(pack));
     }
     return plan;
 }
