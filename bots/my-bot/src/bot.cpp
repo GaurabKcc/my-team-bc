@@ -575,7 +575,35 @@ void Bot::farm_camps(bool engage_shooter) {
         attack_camps();
 }
 
+// DIAGNOSTIC: which state absorbs each turn? Printed every 200 rounds.
+// This is what revealed that we farm 0% of turns while hist-surv farms
+// 53-80%. Cheap: only runs once every 200 rounds.
+namespace {
+struct Tally {
+    long dead = 0, recall = 0, channel = 0, stun = 0;
+    long bank = 0, flee = 0, fight = 0, help = 0, farm = 0, bankmoving = 0;
+};
+Tally tally;
+void report_tally(std::uint32_t round) {
+    const long total = tally.dead + tally.recall + tally.channel + tally.stun
+        + tally.bank + tally.flee + tally.fight + tally.help + tally.farm;
+    std::cout << "TALLY r=" << round << " tot=" << total
+        << " dead=" << tally.dead << " recall=" << tally.recall
+        << " chan=" << tally.channel << " stun=" << tally.stun
+        << " bank=" << tally.bank << " flee=" << tally.flee
+        << " fight=" << tally.fight << " help=" << tally.help
+        << " farm=" << tally.farm << " bankmoving=" << tally.bankmoving << '\n';
+}
+}
+
 void Bot::play_turn() {
+    static std::uint32_t last_report = 0;
+    if (cambc::round_number() >= last_report + 200) {
+        last_report = cambc::round_number();
+        report_tally(last_report);
+        std::cout.flush();
+    }
+
     // Initialise build: power shards of strength scale our basic attacks.
     // Small drafts (≤3) fight short, burst-heavy skirmishes -> stack strength.
     // Larger drafts are attrition fights -> health shards keep champs alive.
@@ -589,9 +617,10 @@ void Bot::play_turn() {
     update_signal();
     maybe_place_ward();
 
-    if (!me.is_alive() || me.is_recalling() || me.is_submitting_gems() || me.is_teleporting()
-        || (!me.can_move() && !me.can_attack()))
-        return;
+    if (!me.is_alive()) { ++tally.dead; return; }
+    if (me.is_recalling()) { ++tally.recall; return; }
+    if (me.is_submitting_gems() || me.is_teleporting()) { ++tally.channel; return; }
+    if (!me.can_move() && !me.can_attack()) { ++tally.stun; return; }
 
     const bool at_spawn = cambc::map::spawn_region(team::ally).is_set(me.position());
     if (at_spawn) {
@@ -614,6 +643,7 @@ void Bot::play_turn() {
     if (!at_spawn) {
         const float bail = me.gem_count() > 0 ? 0.5f : 0.3f;
         if (me.health() < me.max_health() * bail) {
+            ++tally.flee;
             if (under_threat()) {
                 // Two free tiles first if this champion has a dash.
                 if (!dash_escape())
@@ -632,11 +662,14 @@ void Bot::play_turn() {
     // Bank any carried gems before farming. Carried gems score nothing, so
     // this must come before anything that would walk us somewhere else.
     if (me.gem_count() > 0) {
+        ++tally.bank;
         bool committed = !bank_target.is_empty();
         const auto goals = bank_goal(committed);
         if (!goals.is_empty()) {
-            if (move_towards_closest(goals))
+            if (move_towards_closest(goals)) {
+                ++tally.bankmoving;
                 submit_if_at_altar();
+            }
         }
         return;
     }
@@ -645,6 +678,7 @@ void Bot::play_turn() {
     // Brawl: swing at an adjacent enemy and cash attack-reset for second swing.
     for (const auto& enemy : cambc::vision::champions(team::enemy))
         if (attack_if_in_range(enemy)) {
+            ++tally.fight;
             if (use_attack_reset())
                 for (const auto& again : cambc::vision::champions(team::enemy))
                     if (attack_if_in_range(again)) break;
@@ -654,6 +688,7 @@ void Bot::play_turn() {
     // Help a team-mate flagged in shared memory. Only when we carry no gems:
     // a lost bag costs the whole trip.
     if (should_help()) {
+        ++tally.help;
         const auto sig = read_signal();
         const vec2 spot{sig.x, sig.y};
         if (distance(me.position(), spot) <= me.attack_range() + 2) {
@@ -671,6 +706,7 @@ void Bot::play_turn() {
         }
         return;
     }
+    ++tally.farm;
     farm_camps(false);
 
     me.set_priority(static_cast<std::int32_t>(1 + random_number(100)));
