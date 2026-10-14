@@ -36,10 +36,28 @@ class Bot {
     // Acceptance metric: consecutive rounds standing still while damaged and low.
     int danger_still_turns = 0;
 
+    // ---- Camp-selection memory (Prompt 3): camps outside vision are not
+    // exposed, so remember the last-seen lifecycle of each group and decay the
+    // respawn timer by elapsed rounds. ----
+    struct GroupMemory {
+        std::uint8_t state = 0;     // 0 unknown, 1 alive, 2 reward, 3 respawning
+        std::int32_t timer = 0;     // remaining rounds when last seen
+        std::uint32_t round_seen = 0;
+    };
+    std::array<GroupMemory, 64> group_mem{};
+
     // Telemetry: emit TEAM and per-champion event lines. No gameplay effect.
     void log_telemetry(bool is_designated);
     // Spend on power shards of the chosen stat, keeping some health for survival.
     void buy_items();
+    // Refresh last-seen lifecycle state for every camp group currently in vision.
+    void update_group_memory();
+    // Score every camp group by reward against kill time and risk, refuse the
+    // bad ones (monolith, clearly lethal, respawning) and return the spawn tiles
+    // of all that remain.
+    cambc::bitboard choose_camp_goals();
+    // Attack a camp in range, otherwise approach the best-scoring camp group.
+    void farm_camps(bool engage_shooter, bool did_move_in, bool& attack_spent_out);
 
 public:
     // Score and run the best action state for this turn.

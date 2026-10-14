@@ -152,6 +152,44 @@ const std::array<camp_design, 5>& camp_type_design() {
     return design;
 }
 
+// Static design data for one camp group: member tiles, base hp/strength and the
+// capture reward. Computed once; gameplay scoring only reads this afterwards.
+struct group_member_model {
+    cambc::vec2 position{};
+    float hp = 0.0f;
+    float strength = 0.0f;
+};
+struct camp_group_model {
+    cambc::bitboard spawn;
+    std::vector<group_member_model> members;
+    std::uint32_t gems = 0;
+    std::uint32_t gold = 0;
+    std::int32_t max_respawn = 0;
+    bool monolith = false;
+};
+
+const std::vector<camp_group_model>& camp_group_models() {
+    static const std::vector<camp_group_model> models = [] {
+        std::vector<camp_group_model> out;
+        for (const auto& group : cambc::map::camp_groups()) {
+            camp_group_model m;
+            m.gems = group.gem_value();
+            m.gold = group.gold_value();
+            m.max_respawn = group.max_respawn_timer();
+            m.spawn.clear();
+            for (const auto& member : group) {
+                const auto bs = member.base_stats();
+                m.spawn.set(member.spawn_position());
+                m.members.push_back({member.spawn_position(), bs.base_health, bs.base_strength});
+                if (member.is_monolith()) m.monolith = true;
+            }
+            out.push_back(std::move(m));
+        }
+        return out;
+    }();
+    return models;
+}
+
 // Union of every camp's attack zone; used to route around danger statically.
 const cambc::bitboard& all_danger_tiles() {
     static const cambc::bitboard danger = [] {
@@ -440,9 +478,130 @@ bool attack_camps(bool attack_spent, bool& attack_spent_out) {
     return false;
 }
 
-// Attack a camp already in range, otherwise move onto a claimed camp region.
+// Refresh last-seen lifecycle state for each group in vision. Camp groups
+// outside vision are not exposed, so unseen groups keep their remembered state
+// and its respawn timer decays by elapsed rounds in choose_camp_goals().
+void Bot::update_group_memory() {
+    const std::uint32_t round = cambc::round_number();
+    const auto visible = cambc::vision::visible_tiles();
+    std::size_t i = 0;
+    for (const auto& group : cambc::map::camp_groups()) {
+        if (i >= group_mem.size()) break;
+        const auto spawn = group.spawn_tiles();
+        if (!(spawn & visible).is_empty()) {
+            std::int8_t state = 1;
+            std::int32_t timer = 0;
+            safely([&] {
+                std::visit([&](auto&& v) {
+                    using T = std::decay_t<decltype(v)>;
+                    if constexpr (std::is_same_v<T, cambc::map::camp_group_alive>)
+                        state = 1;
+                    else if constexpr (std::is_same_v<T, cambc::map::camp_group_reward_available>)
+                        state = 2;
+                    else {
+                        state = 3;
+                        timer = v.timer;
+                    }
+                }, group.state());
+                return true;
+            }, "gm_state");
+            group_mem[i].state = static_cast<std::uint8_t>(state);
+            group_mem[i].timer = timer;
+            group_mem[i].round_seen = round;
+        }
+        ++i;
+    }
+}
+
+// Score every camp group by reward against travel + kill + capture + risk,
+// refuse the bad ones (monolith, clearly lethal, still respawning) and return
+// the spawn tiles of all that remain. Returns an empty board only if no group
+// survives the filters.
+cambc::bitboard Bot::choose_camp_goals() {
+    auto& me = cambc::self();
+    const std::uint32_t round = cambc::round_number();
+    update_group_memory();
+    const auto& models = camp_group_models();
+
+    // Our damage per round: basic attack plus ability damage amortised over its
+    // 8-round cooldown cycle (abilities are cast opportunistically by farm_camps).
+    float my_dps = me.strength();
+    for (auto& ability : me.abilities()) {
+        safely([&] {
+            if ((ability.is_damage() || ability.is_aoe_damage()) && ability.damage_amount() > 0.0f)
+                my_dps += ability.damage_amount() / 8.0f;
+            return true;
+        }, "dps_ability");
+    }
+    my_dps = std::max(my_dps, 1.0f);
+
+    // Team context: the living roster adds its attack damage and health. A fight
+    // is judged against the whole team, which converges on the chosen camps (the
+    // movement goals are a union, so allies pick the same clusters).
+    float team_dps = my_dps;
+    float team_hp = std::max(me.health(), 1.0f);
+    for (const auto& ally : cambc::champions(team::ally)) {
+        if (is_self(ally)) continue;
+        bool alive = false;
+        float ahp = 0.0f, astr = 0.0f;
+        safely([&] {
+            alive = ally.is_alive();
+            if (alive) { ahp = ally.health(); astr = ally.strength(); }
+            return alive;
+        }, "team_ctx");
+        if (alive) {
+            team_dps += astr;
+            team_hp += ahp;
+        }
+    }
+    team_dps = std::max(team_dps, 1.0f);
+
+    // Union the spawn tiles of every group the scoring accepts. Routing several
+    // candidate groups through one distance field lets each champion take its
+    // nearest good camp while the team still converges where choices overlap —
+    // the clumping that keeps champions alive in the early brawls. Refusing the
+    // bad groups (monolith, clearly lethal, respawning) is where the scoring
+    // changes play.
+    const auto visible = cambc::vision::visible_tiles();
+    cambc::bitboard goals;
+    goals.clear();
+    for (std::size_t i = 0; i < models.size() && i < group_mem.size(); ++i) {
+        const auto& m = models[i];
+        const auto& mem = group_mem[i];
+
+        // The monolith is 20000 hp and 200 damage/round: never worth the wipe.
+        if (m.monolith) continue;
+
+        // Skip a group that is respawning right now; a group whose timer has not
+        // elapsed but is back in vision is refreshed by update_group_memory.
+        const bool in_vision = !(m.spawn & visible).is_empty();
+        if (in_vision && mem.state == 3) {
+            const std::int32_t remaining =
+                mem.timer - static_cast<std::int32_t>(round - mem.round_seen);
+            if (remaining > 0) continue;
+        }
+
+        // Refuse a fight that would clearly break the engaged team.
+        const bool reward_ready = (mem.state == 2);
+        float total_hp = 0.0f, total_str = 0.0f;
+        if (!reward_ready) {
+            for (const auto& member : m.members) {
+                total_hp += member.hp;
+                total_str += member.strength;
+            }
+        }
+        const float kill_time = total_hp / team_dps;
+        const float expected_taken = total_str * kill_time * 0.5f;
+        if (!reward_ready && expected_taken > team_hp * 3.0f) continue;
+
+        goals |= m.spawn;
+    }
+    return goals;
+}
+
+// Attack a camp already in range, otherwise approach the best-scoring camp group.
 // When being shot from out of range, close in on the visible camp instead.
-void farm_camps(bool engage_shooter, bool did_move_in, bool& attack_spent_out) {
+void Bot::farm_camps(bool engage_shooter, bool did_move_in, bool& attack_spent_out) {
     // Try casting before moving; if we have not moved, we can cast exclusive abilities
     cast_offensive_ability(did_move_in);
 
@@ -461,17 +620,8 @@ void farm_camps(bool engage_shooter, bool did_move_in, bool& attack_spent_out) {
         }
     }
 
-    if (goals.is_empty()) {
-        // Union every group's spawn tiles, skipping groups that are
-        // visibly respawning.
-        const auto visible = cambc::vision::visible_tiles();
-        for (const auto& group : cambc::map::camp_groups()) {
-            const bool group_visible = !(group.spawn_tiles() & visible).is_empty();
-            if (group_visible && std::holds_alternative<cambc::map::camp_group_respawning>(group.state()))
-                continue;
-            goals |= group.spawn_tiles();
-        }
-    }
+    if (goals.is_empty())
+        goals = choose_camp_goals();
 
     // Fresh vision after movement may reveal a camp already in range. Some
     // spells cannot be cast after normal movement, so only swing here.
@@ -530,7 +680,8 @@ void Bot::log_telemetry(bool is_designated) {
     safely([&] { alive = me.is_alive(); return alive; }, "tele_alive");
     if (last_alive && !alive) {
         std::cout << "E|r=" << round << "|cid=" << cid << "|DEATH|hp=0|gems="
-                  << last_gem_count << "|near=" << nearest_camp_name(last_position) << '\n';
+                  << last_gem_count << "|pos=(" << last_position.x << "," << last_position.y << ")"
+                  << "|near=" << nearest_camp_name(last_position) << '\n';
     } else if (!last_alive && alive) {
         std::cout << "E|r=" << round << "|cid=" << cid << "|RESPAWN|hp="
                   << static_cast<int>(me.health()) << "|gems=" << me.gem_count()
