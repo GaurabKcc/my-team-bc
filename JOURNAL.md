@@ -513,3 +513,31 @@ fights, not at farming. Four candidate causes, each toggled and re-measured:
   opponent's at the moment contact happens, or the map/draft matchup favours
   them. Both need per-champion stat and level data from a live match, which
   the statistics export does not expose.
+
+
+## 2026-10-15 — reset the base to the e0051d0 strategy
+
+User's call, and the measurements support it. The accumulated build had been
+layering changes onto a base that was quietly worse than one of its own
+ancestors.
+
+Side by side on collision against the same opponent:
+
+  metric        old build   e0051d0 base
+  league        3-1         4-0
+  PvP 9 games   3-6 / 5-4   4-5
+  vs starter    9-0         8-1 (monolith now a loss)
+
+- Decision: promote e0051d0 to bots/my-bot. League 4-0 is the strongest result
+  any build has produced, measured against opponents that actually fight.
+- The 9-0 against starter-cpp was a strawman metric and is now 8-1; that is the
+  correct trade, and it is the same mistake the 9-0 "champion" label was.
+- What the old build had that this one lacks: wards, dash-escape, the
+  shared-memory danger signal, Monster shards, altar and farm target
+  commitment, enemy-first ability targeting, the turn-accounting diagnostic.
+  Each of those was measured individually and several were genuine local wins,
+  so they are candidates to re-apply and re-measure ON TOP of this base rather
+  than assumed good or bad.
+- The finding that motivated the reset still stands: the old build farmed 0% of
+  turns against this one's 53-80%, and the old build died 7-10 times per game
+  against this one's 0.

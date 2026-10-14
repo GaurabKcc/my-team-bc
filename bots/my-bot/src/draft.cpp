@@ -1,4 +1,4 @@
-// Map-adaptive draft scoring: picks scale with the camps the map actually has.
+// Hybrid draft: gaurab's map-adaptive scoring + our ward-first + better emblems
 #include <cambc.h>
 #include "draft.h"
 #include <algorithm>
@@ -119,8 +119,9 @@ std::string build_plan(const MapFeatures& f,
             plan += ',';
         plan += cambc::to_string(picks[i]);
     }
-    plan += "|plan=commit to one camp target; commit to one altar;";
-    plan += " run clear of damage before recalling; bank before farming.";
+    plan += "|plan=bruise camps together; clear clustered groups first;";
+    plan += " bank gems at the nearest altar; keep a body near spawn;";
+    plan += " ward-first; Monster emblem; stuck detect; threat retreat.";
     return plan;
 }
 
