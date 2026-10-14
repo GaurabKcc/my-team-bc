@@ -125,6 +125,63 @@ std::string build_plan(const MapFeatures& f,
     return plan;
 }
 
+// Deterministic ordering of the map's camp groups, richest first. Both the
+// draft and the match recompute this identically from static map data, so a
+// champion can find its assigned group with no communication. Spreading the
+// team across sectors is what the top of the ladder does; converging on one
+// camp splits rewards and gets everyone killed together.
+std::vector<std::uint8_t> assign_groups(const MapFeatures& f) {
+    struct Entry {
+        std::uint32_t gems;
+        std::uint32_t gold;
+        int tile;
+        int index;
+    };
+    std::vector<Entry> entries;
+    int i = 0;
+    for (const auto& group : cambc::map::camp_groups()) {
+        int first = 1 << 20;
+        for (auto tile : group.spawn_tiles().positions())
+            first = std::min(first, tile.y * 1000 + tile.x);
+        entries.push_back({group.gem_value(), group.gold_value(), first, i++});
+    }
+    std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+        if (a.gems != b.gems)
+            return a.gems > b.gems;
+        if (a.gold != b.gold)
+            return a.gold > b.gold;
+        return a.tile < b.tile;
+    });
+    std::vector<std::uint8_t> assign;
+    if (entries.empty())
+        return assign;
+    for (std::size_t slot = 0; slot < static_cast<std::size_t>(f.team_size); ++slot)
+        assign.push_back(static_cast<std::uint8_t>(entries[slot % entries.size()].index));
+    return assign;
+}
+
+// Machine-readable tail appended after the text plan and its NUL: version,
+// team size, then (champion id, camp-group index) per pick in pick order, so a
+// champion can find its own sector at match time.
+std::vector<std::byte> build_plan_bytes(const MapFeatures& f,
+                                        const std::vector<champion_draft>& picks) {
+    const std::string text = build_plan(f, picks);
+    std::vector<std::byte> plan;
+    plan.reserve(text.size() + 4 + picks.size() * 2);
+    for (char c : text)
+        plan.push_back(static_cast<std::byte>(static_cast<unsigned char>(c)));
+    plan.push_back(std::byte{0});
+    plan.push_back(std::byte{1}); // version
+    plan.push_back(static_cast<std::byte>(f.team_size));
+    const auto assign = assign_groups(f);
+    for (std::size_t slot = 0; slot < picks.size(); ++slot) {
+        plan.push_back(static_cast<std::byte>(static_cast<int>(picks[slot])));
+        plan.push_back(slot < assign.size() ? static_cast<std::byte>(assign[slot])
+                                            : std::byte{0});
+    }
+    return plan;
+}
+
 } // namespace
 
 void play_draft() {
@@ -133,9 +190,20 @@ void play_draft() {
 
     const auto pick = choose_next(features, chosen);
 
+    // Pick first: a missed pick is filled randomly by the engine, which is the
+    // worst possible outcome. The plan write below cannot cost us the pick.
+    cambc::draft::pick(pick);
+
     auto picks = chosen;
     picks.push_back(pick);
-    cambc::draft_memory = std::string_view(build_plan(features, picks));
-
-    cambc::draft::pick(pick);
+    try {
+        cambc::draft_memory = build_plan_bytes(features, picks);
+    } catch (...) {
+        // Text-only fallback: picks are already made, so the match still
+        // works, just without sector assignments.
+        try {
+            cambc::draft_memory = std::string_view(build_plan(features, picks));
+        } catch (...) {
+        }
+    }
 }

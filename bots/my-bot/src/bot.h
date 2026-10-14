@@ -11,6 +11,14 @@ class Bot {
     std::uint32_t first_gold_round = 0;
     std::uint32_t first_emblem_round = 0;
     bool early_reported = false;
+    // Sector assignment from the draft plan. Each champion owns a different
+    // camp group so the team spreads instead of converging on one camp.
+    bool assignment_read = false;
+    int my_group = -1;
+
+    bool read_assignment();
+    cambc::bitboard assigned_target();
+    void farm_camps(bool engage_shooter);
 
 public:
     void play_turn();

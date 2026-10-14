@@ -767,3 +767,30 @@ same drafts. Identical code, identical tape, winner determined by side.
   means nothing until the same code wins from the other side. Swapping sides
   is nearly free (one more match) and would have saved three rounds of
   bisecting the wrong suspect. Run mirrored pairs by default from here on.
+
+
+## 2026-10-15 — sector assignment from the #1-vs-#2 video (KEPT)
+
+The video showed both top teams holding about one champion per map sector all
+game, never clustering. Our bot had no spreading mechanism: every champion
+independently walked to its own nearest camp, so two of them routinely
+converged, split rewards, and died together.
+
+- Draft writes a machine-readable tail after the text plan and its NUL:
+  version, team size, then (champion id, camp-group index) per pick. Groups
+  are ordered richest-first by (gems, gold, tile), slots assigned round-robin.
+  The pick itself is submitted BEFORE the memory write, so a write failure can
+  never cost us the pick (that failure mode burned us before: random fills).
+  Text fallback preserved.
+- Match side reads the tail, maps champion_name to its draft id (Cassi and
+  Issac share their pick's slot), and farms its assigned group first,
+  falling back to nearest-farmable when it is dead or respawning.
+- Result: 8W-1L over all 9 maps with ONE total death across the round-robin
+  (0,0,0,0,1,0,0,0,0). Drafts deterministic, zero engine errors. The monolith
+  loss is pre-existing: stashed the change, rebuilt clean HEAD, and HEAD loses
+  monolith too.
+- PvP spot-check vs hist-surv on two maps: 1-1 (lost collision 630-1062 with
+  9 deaths, won interlock 1038-704). Sectors do not fix losing fights; that
+  remains the open PvP item alongside carrier-priority brawling.
+- Decision: KEEP. The death count is the strongest single signal in this
+  session, and spreading matches the best available evidence of top play.
