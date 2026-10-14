@@ -13,3 +13,8 @@ bots/*/target/
 *.pdf
 bots/hist-*/
 bots/hist-tally/
+.batch-manifest.txt
+results.csv
+results-*.csv
+bots/exp-*/
+bots/my-tally/

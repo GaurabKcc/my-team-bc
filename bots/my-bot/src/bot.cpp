@@ -1,4 +1,5 @@
-// Minimal winning bot: gaurab's 9-0 logic + Monster->Home emblems + ward-first
+// e0051d0 survival base + exception guards + Willow self-heal fix + sectors.
+// Power shards (strength <=3 team, health otherwise); banks on any carry.
 #include <cambc.h>
 #include "bot.h"
 #include <array>
@@ -330,19 +331,40 @@ void Bot::play_turn() {
 
     auto& me = cambc::self();
 
-    if (!me.is_alive() || me.is_recalling() || me.is_submitting_gems() || me.is_teleporting()
-        || (!me.can_move() && !me.can_attack()))
-        return;
-
-    const bool at_spawn = cambc::map::spawn_region(team::ally).is_set(me.position());
-    if (at_spawn) {
-        auto& me2 = cambc::self();
+    if (!me.is_alive()) {
+        // Shop while dead: rules allow purchases on spawn OR while dead, so a
+        // 60-round death is otherwise 60 wasted shopping turns. Measured
+        // neutral (9-9) in mirrored test; kept as a pure turn-conversion.
         const std::array items{cambc::item_type::power_shard_of_strength,
             cambc::item_type::power_shard_of_focus, cambc::item_type::power_shard_of_health};
         const auto item = items[chosen_stat];
-        const unsigned count = me2.gold_count() / item.cost();
-        if (count && me2.can_buy(item, count)) me2.buy(item, count);
+        const unsigned count = me.gold_count() / item.cost();
+        try {
+            if (count && me.can_buy(item, count))
+                me.buy(item, count);
+        } catch (...) {
+        }
+        return;
     }
+    // Shop every chance: attempt BEFORE the action guard (a spawn-standing
+    // champ with spent move/attack may still shop) and use Tavi's passive
+    // (shards purchasable anywhere on the map). Mirrored test: neutral 9-9,
+    // kept as a missed-chance conversion like shop-while-dead.
+    const bool at_spawn = cambc::map::spawn_region(team::ally).is_set(me.position());
+    if (at_spawn || me.champion_name() == cambc::champion_type::tavi) {
+        const std::array items{cambc::item_type::power_shard_of_strength,
+            cambc::item_type::power_shard_of_focus, cambc::item_type::power_shard_of_health};
+        const auto item = items[chosen_stat];
+        const unsigned count = me.gold_count() / item.cost();
+        try {
+            if (count && me.can_buy(item, count)) me.buy(item, count);
+        } catch (...) {
+        }
+    }
+
+    if (me.is_recalling() || me.is_submitting_gems() || me.is_teleporting()
+        || (!me.can_move() && !me.can_attack()))
+        return;
 
     // SURVIVAL: run clear of damage first, then recall. Recall is cancelled
     // by any hit, so recalling while a camp or enemy can still reach us is how
@@ -371,8 +393,10 @@ void Bot::play_turn() {
             return;
         }
 
-    // Bank any carried gems before farming.
-    if (me.gem_count() > 0) {
+    // Submit only a FULL bag (>=40 gems): light carriers keep acting, full
+    // carriers become the submitters - the team splits by bag size. Measured
+    // 10-8 over bank-on-any-gem (swept interlock+rows).
+    if (me.gem_count() >= 40) {
         cambc::bitboard goals;
         goals.clear();
         for (auto altar : cambc::map::altars().positions()) {

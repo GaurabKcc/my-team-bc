@@ -996,3 +996,180 @@ is exactly what the baseline already does (plain in-range brawl, no chase
 logic anywhere, help-out removed). hist-surv, the best measured bot, does
 the same: it fights 17-24 turns a game, never hunts. "Don't hunt" is the
 validated principle; "don't fight back" is its strawman, now refuted.
+
+## 2026-10-15 — batched-mirror harness; three feature re-adds refuted; side-death mechanism found
+
+Session goal (user call): dominate the real ladder. Experiment protocol
+(user call): parallel batches, mirrored both orders, one variable each.
+
+### Hygiene: what ships does not match what the journal claimed
+- Audit pinned three mismatches to code and fixed them (measured-neutral per
+  earlier entries, but the shipped tree must say what it does):
+  1. draft.cpp carried a DIAG leftover that BYPASSED the role-coverage gate
+     (computed `allowed`, then discarded it). Restored the gate
+     (allowed.empty() ? remaining : allowed).
+  2. The draft memory plan text still advertised "ward-first; Monster emblem;
+     stuck detect; threat retreat" - none of which exist in the bot. Now
+     describes actual behavior (own sector; run then recall; Power shards).
+  3. bot.cpp header comment was stale ("Monster->Home emblems + ward-first").
+- Deleted the four untracked bots/contender-* folders: they were built off a
+  pre-reset base and would have produced misleading one-variable diffs.
+
+### Harness: scripts/verify.sh rewritten
+- `cambc run-batch --jobs N` over a generated manifest; every pair plays BOTH
+  orders across the selected maps; results appended to results.csv
+  (utc,botA,botB,map,winner,side,round); ONLY_BOTS="a b" restricts the league
+  to a challenger head-to-head. Replays land in replays/vfy-*.
+- Validated: 20-game collision league, 0 failed, records correct
+  (hist-surv 6-2, hist-wards 5-3, my-bot 5-3, hist-monster 4-4, hist-9zero 0-8).
+
+### Experiment 1: first-pick Varg (draft ORDER policy) — REFUTED
+- One variable vs HEAD; 6 mirrored games (collision/interlock/monolith).
+- Result 3-3, and every map was side-decided (same side won both orders).
+  Pick order changes the tape (rounds differ) but not a single winner.
+- Verdict: no lever here against our own historical opponents. The earlier
+  "forced Varg-first flipped the hist-monster fixture" stands as a
+  single-fixture observation; it does not generalize.
+
+### Experiment 2: enemy-first ability targeting — REFUTED on this base
+- One variable vs HEAD; 18 mirrored games (all 9 maps).
+- Result 8-10. Won interlock 2-0 (both orders), but LOST elkring and corners
+  2-0 each. Overall negative.
+- This SUPERSEDES the older "RIGHT: +56%/+124% champion damage" verdicts:
+  those were measured on older bases and/or without both-sides play. Camps-
+  first (the shipped order) is correct on the current base.
+
+### Experiment 3: wards re-test — REFUTED on this base
+- One variable vs HEAD: free ward every round (verified mechanically first -
+  757 successful placements in one probe game, print removed after). Priority:
+  altar we are carrying to, else our assigned camp group, else nearest group;
+  far edge of the placement mask that still covers the anchor.
+- 18 mirrored games (all 9 maps): 7-11. Clean losses on collision, interlock,
+  corners, lanes; clean wins on packs and rows; side-decided elsewhere.
+- SUPERSEDES the earlier "wards KEPT" and "wards disabled -> 1-8" verdicts,
+  which predate the reset base and the mirrored harness. Wards cost farm
+  turns on this base. The ladder-CSV observation (opponents hold 2-6 wards)
+  may still be true but is not something we should copy.
+
+### Turn accounting: the deaths follow the SIDE, not the code
+- Instrumented BOTH bots this time (exp-tally = my-bot+counters,
+  hist-tally = e0051d0+counters, same python patch), ran collision in both
+  orders.
+- As Team A: we lose 110-1004 with 9 deaths; three champions burn 60 dead
+  owner-turns each inside the first 200 rounds. hist-surv as A in the mirror
+  game: also dies (10 deaths, up to 120 dead turns by r400).
+- As Team B: we win 1012-256 with ZERO dead turns through r600, and farm
+  counts per champion at r600 are 300-483 (vs hist-surv-as-A 105-257).
+- Conclusion: on collision, Team A dies and Team B thrives, whoever runs
+  which code. The long-standing "we clear 58% of hist-surv's monster damage
+  and bank 33% of their gems" gap was substantially a SIDE artifact - those
+  measurements were not always mirrored. The mechanism (why side A's spawns
+  feed early deaths) is OPEN and is now the top diagnostic.
+- Process upgrade, standing: scripts/verify.sh mirrors by default; a
+  throughput or damage comparison taken from an unmirrored pair is void.
+
+### Ladder
+- No CLI session on this machine (cambc login is interactive). my-bot.zip is
+  bundled and current. Blocking step is the user running `cambc login`, then
+  `cambc submit my-bot`.
+
+### Verdicts
+- KEEP: current build (e0051d0 base + guards + willow-fix + sectors), plus
+  today's hygiene edits. Refuted this session, all reverted: first-pick Varg,
+  enemy-first abilities, wards.
+- OPEN (ranked): (1) side-death mechanism - why Team A loses champions early
+  on collision, and whether other maps share it; (2) altar-lock denial, the
+  one mechanic nobody has ever tested; (3) ladder submission + mining real
+  opponent CSVs; (4) map+side-aware caution only if (1) generalizes.
+
+## 2026-10-15 — older-models league + five-feature battery (user-requested)
+
+### Older-models league: current build is mid-pack, hist-surv still ahead
+108 games (6 historical models x 9 maps x both orders, results-older.csv):
+- vs hist-9zero 16-2 (7 map sweeps), hist-monster 11-7, hist-cornersfix 10-8,
+  hist-wards 9-9, hist-sector (270d418) 9-9, **hist-surv 7-11**.
+- hist-surv sweeps corners+rows; we sweep nothing against it. The claim
+  "my-bot strictly dominates hist-surv" (pre-sector) is DEAD: something
+  added after the 37fa4db promotion - the gaurab-hybrid draft and/or sectors -
+  made us worse than our own ancestor. Triangle bisect launched.
+
+### Five-feature battery (user: shop, idle, dash, teleport, shared memory)
+18 games each, mirrored, 9 maps (results-five.csv):
+| change | record | verdict |
+|---|---|---|
+| shop while dead | 9-9 | NEUTRAL; kept (converts provably-dead turns to shop turns, rules-correct, zero cost) |
+| dash-escape while fleeing | 9-9 | NEUTRAL; not kept (splits: wins interlock/rows, loses corners/lanes) |
+| idle when nothing visible/actionable within 12 | 6-12 | REFUTED. Walking blind into fog IS the farm model; standing still forfeits discovery |
+| shared-memory danger alerts (kept-version port) | 4-14 | REFUTED, again. Rescue costs more farm than it returns on this base |
+| teleport crystal while fleeing | 4-14 | REFUTED. 3-turn channel in danger is a death sentence; 10g wasted |
+- Answers the user's mechanics questions for the record: recall costs NO
+  money (5-turn channel, 3 with Home); fuel is per-champion per-turn, resets
+  each turn, and cannot be transferred to another bot - unused fuel is gone.
+- my-bot now includes shop-while-dead. Standing order: turn waste is attacked
+  with measurements (tally.sh both-sides), not feature re-adds.
+
+## 2026-10-15 — sector bisect, draft battery, altar lock, harness fix
+
+### Sector bisect: sectors are NOT the hist-surv regression (54 games, results-sector.csv)
+- my-bot minus sectors vs hist-surv: 8-10 (was 7-11 with sectors) — removing
+  sectors recovers ~1 game, not the gap. Corners no longer swept.
+- hist-sector (270d418) vs hist-surv: 7-11 with round numbers IDENTICAL to
+  our my-bot vs hist-surv tapes -> hist-sector plays like current my-bot.
+- exp-nosector vs my-bot: 8-10 (sectors marginally help mirror).
+- VERDICT (bisect): regression vs hist-surv lives in the DRAFT, not sectors.
+
+### Draft battery: old draft wins (36 games, results-draft.csv)
+- exp-olddraft (e0051d0 draft.cpp/h on current base) vs my-bot (hybrid draft):
+  10-8 -> OLD DRAFT PROMOTED into bots/my-bot/src (draft.cpp/draft.h from e0051d0).
+- exp-olddraft vs hist-surv: 8-10 (hybrid was 7-11) — gap narrows, not closed.
+
+### Altar lock: REFUTED (18 games, results-final.csv)
+- exp-lock (buy altar lock w/ shard remainder; place before own tribute when an
+  enemy is within 3 of the altar) vs my-bot: 7-11. Not kept. The 10g delays
+  shard completion and the lock never pays it back in our test pattern.
+
+### Harness bug fixed: verify.sh re-runs of previously-played pairings failed
+- run-batch refuses to overwrite existing outputs; stale replays/vfy-*.repl26a
+  from earlier leagues made every repeat pairing exit 1 with "output or
+  diagnostic already exists" (diagnostic now printed; namespace cleared per run).
+
+### Current my-bot = hist-surv base + guards + Willow self-heal fix + shop-while-dead
+### + OLD draft (hybrid draft demoted). Validation vs hist-surv: running.
+
+## 2026-10-15 — shop-anywhere + full-bag banking (user: "shop when you get the chance", "submit when full", "split the team", "fewer moves")
+
+### Facts established from rules
+- Movement is 1 tile/turn for everyone; our pathing is already step-optimal.
+  "Fewer moves" therefore means fewer TRIPS, not shorter paths.
+- Normal champs shop only on spawn or while dead; Tavi buys shards anywhere
+  (GameRules.md:675) - his passive was completely unused (he is in our pool).
+- Gems cannot be transferred between champions; the only "split team" possible
+  is by bag size: full carriers submit, light carriers keep acting.
+- No hard gem cap exists. Tribute duration = ceil(bag/10) ticks.
+- Current code banked on ANY gem (bot.cpp:391) -> constant 1-gem round trips.
+
+### Two one-variable challengers built (merged dead-shop/base kept from prior)
+- exp-shopany: shop attempt moved BEFORE the action guard; buys shards at
+  spawn or anywhere as Tavi; dead-shop unchanged.
+- exp-fullbag: bank threshold >0 -> >=40 gems (survival/farm untouched;
+  the 50% HP bail while carrying is unchanged).
+Batteries: parallel, 18 games each (9 maps x both orders), JOBS=2 each.
+
+## 2026-10-15 — shop-every-chance + full-bag banking results
+
+### Harness fix (round 2): parallel-safe verify.sh
+- Two batteries launched simultaneously clobbered shared `.batch-manifest.txt`
+  and the `replays/vfy-*` namespace (including cross-deleting each other's
+  in-flight replays -> 14+22 failed publishes, mixed batches).
+- verify.sh now uses per-PID manifest + per-PID replay dir (`replays/run-$$`),
+  prunes run dirs older than 1 day, and guards `set -u` on unknown winners.
+
+### Results (18 games each, 9 maps x both orders)
+| change | record | verdict |
+|---|---|---|
+| shop every chance (spawn before guard + Tavi field-buy) | 9-9, zero sweeps | NEUTRAL; KEPT (same class as shop-while-dead: converts missed chances, no cost) |
+| bank full bag >=40 gems instead of any gem | 10-8 (sweeps: interlock+rows vs corners loss) | WON; PROMOTED. Team now splits by bag size: light carriers act, full carriers submit |
+- Survival untouched: 50% HP bail while carrying still applies (full bag
+  dies = feeds killer 50g + gems, so the bail is the risk control).
+- Combined build (both promotions) validating vs hist-surv (standing
+  yardstick: 8-10 with pre-combination build).
