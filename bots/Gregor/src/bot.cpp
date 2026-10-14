@@ -10,6 +10,30 @@
 #include <type_traits>
 #include <variant>
 
+// ---- Team shared memory (8 bytes per team, persistent for the whole match) ----
+// The lowest-id living ally is the coordinator and is the only writer; every
+// champion reads the buffer back. Writes race between champions in the same
+// round, so the plan is idempotent and last-writer-wins from the single writer.
+//
+//   byte 0  magic 0x5A, marks a valid plan (0 before the first write)
+//   byte 1  focus camp-group index into camp_group_models() (0xFF = none)
+//   byte 2  phase: 0 idle, 1 gather, 2 engage, 3 capture
+//   byte 3  round the target was chosen, low byte (drives the gather timer)
+//   byte 4  travel estimate in rounds for the current target
+//   byte 5  champion id that should claim the capture reward (0xFF = none)
+//   bytes 6-7 reserved
+namespace sm {
+inline constexpr std::size_t kMagic = 0;
+inline constexpr std::size_t kTarget = 1;
+inline constexpr std::size_t kPhase = 2;
+inline constexpr std::size_t kSetRound = 3;
+inline constexpr std::size_t kTravel = 4;
+inline constexpr std::size_t kCapturer = 5;
+inline constexpr std::uint8_t kMagicValue = 0x5A;
+inline constexpr std::uint8_t kNoTarget = 0xFF;
+enum phase { idle = 0, gather = 1, engage = 2, capture = 3 };
+}  // namespace sm
+
 using cambc::vec2;
 using cambc::team;
 
@@ -513,6 +537,133 @@ void Bot::update_group_memory() {
     }
 }
 
+// Read or update the team plan. The coordinator (lowest-id living ally) writes
+// the focus target and its phase; everyone else just adopts the plan.
+void Bot::refresh_team_plan(bool is_designated) {
+    auto& me = cambc::self();
+    const std::uint32_t round = cambc::round_number();
+    const auto& models = camp_group_models();
+    update_group_memory();
+
+    if (!is_designated) {
+        const std::uint8_t magic = cambc::shared_memory[sm::kMagic];
+        const std::uint8_t tidx = cambc::shared_memory[sm::kTarget];
+        plan_target = (magic == sm::kMagicValue && tidx < models.size())
+            ? static_cast<int>(tidx) : -1;
+        plan_phase = cambc::shared_memory[sm::kPhase];
+        plan_travel = cambc::shared_memory[sm::kTravel];
+        plan_set_round = cambc::shared_memory[sm::kSetRound];
+        const std::uint8_t cap = cambc::shared_memory[sm::kCapturer];
+        plan_capturer = (cap == sm::kNoTarget) ? -1 : static_cast<int>(cap);
+        return;
+    }
+
+    // --- Coordinator path: validate the current target, else choose a new one. ---
+    const std::uint8_t magic = cambc::shared_memory[sm::kMagic];
+    std::uint8_t tidx = cambc::shared_memory[sm::kTarget];
+    std::uint8_t set_round = cambc::shared_memory[sm::kSetRound];
+    std::uint8_t travel = cambc::shared_memory[sm::kTravel];
+
+    // The plan is advisory, so keep it cheap: the coordinator uses its own stats
+    // and position as the yardstick instead of scanning the whole roster (ally
+    // positions are not even visible outside vision and would throw).
+    const float team_dps = std::max(me.strength(), 1.0f);
+    const float team_hp = std::max(me.health(), 1.0f);
+    const cambc::vec2 centroid = me.position();
+
+    // Is the remembered target still worth focusing?
+    bool valid = (magic == sm::kMagicValue && tidx < models.size());
+    if (valid) {
+        const auto& m = models[tidx];
+        if (m.monolith) {
+            valid = false;
+        } else {
+            const auto& mem = group_mem[tidx];
+            if (mem.state == 3) {
+                const std::int32_t remaining =
+                    mem.timer - static_cast<std::int32_t>(round - mem.round_seen);
+                if (remaining > 0) valid = false;
+            }
+        }
+    }
+
+    int group = valid ? static_cast<int>(tidx) : -1;
+    int phase = sm::idle;
+    if (group >= 0) {
+        const auto& mem = group_mem[group];
+        if (mem.state == 2) {
+            phase = sm::capture;
+        } else {
+            float total_str = 0.0f;
+            for (const auto& member : models[group].members) total_str += member.strength;
+            const std::uint8_t elapsed = static_cast<std::uint8_t>(round - set_round);
+            if (total_str <= 0.0f || elapsed >= static_cast<std::uint8_t>(travel + 1))
+                phase = sm::engage;
+            else
+                phase = sm::gather;
+        }
+    } else {
+        // Choose the best nearby group so the team can converge on it.
+        float best = -1.0f;
+        for (std::size_t i = 0; i < models.size() && i < group_mem.size(); ++i) {
+            const auto& m = models[i];
+            if (m.monolith) continue;
+            const auto& mem = group_mem[i];
+            const bool reward_ready = (mem.state == 2);
+            if (mem.state == 3 && !reward_ready) {
+                const std::int32_t remaining =
+                    mem.timer - static_cast<std::int32_t>(round - mem.round_seen);
+                if (remaining > 0) continue;
+            }
+            int dist = 1 << 30;
+            for (auto tile : m.spawn.positions())
+                dist = std::min(dist, distance(centroid, tile));
+            if (dist >= (1 << 30)) continue;
+
+            float total_hp = 0.0f, total_str = 0.0f;
+            if (!reward_ready) {
+                for (const auto& member : m.members) {
+                    total_hp += member.hp;
+                    total_str += member.strength;
+                }
+            }
+            const float kill_time = total_hp / team_dps;
+            if (!reward_ready && total_str * kill_time * 0.5f > team_hp * 3.0f) continue;
+            const float reward =
+                static_cast<float>(m.gems) + 0.08f * static_cast<float>(m.gold);
+            const float score = reward / (static_cast<float>(dist) + kill_time + 5.0f);
+            if (score > best) { best = score; group = static_cast<int>(i); travel = static_cast<std::uint8_t>(std::min(dist, 255)); }
+        }
+        if (group >= 0) {
+            set_round = static_cast<std::uint8_t>(round);
+            phase = sm::gather;
+            if (group_mem[group].state == 2) phase = sm::capture;
+            else {
+                float total_str = 0.0f;
+                for (const auto& member : models[group].members) total_str += member.strength;
+                if (total_str <= 0.0f) { phase = sm::engage; travel = 0; }
+            }
+        }
+    }
+
+    // The coordinator claims the capture reward so allies do not split it.
+    const std::uint8_t selfid = static_cast<std::uint8_t>(static_cast<cambc::handle_champion_t>(me));
+    const std::uint8_t capturer = (phase == sm::capture) ? selfid : sm::kNoTarget;
+
+    cambc::shared_memory[sm::kMagic] = sm::kMagicValue;
+    cambc::shared_memory[sm::kTarget] = (group < 0) ? sm::kNoTarget : static_cast<std::uint8_t>(group);
+    cambc::shared_memory[sm::kPhase] = static_cast<std::uint8_t>(phase);
+    cambc::shared_memory[sm::kSetRound] = set_round;
+    cambc::shared_memory[sm::kTravel] = travel;
+    cambc::shared_memory[sm::kCapturer] = capturer;
+
+    plan_target = group;
+    plan_phase = phase;
+    plan_travel = travel;
+    plan_set_round = set_round;
+    plan_capturer = (capturer == sm::kNoTarget) ? -1 : static_cast<int>(capturer);
+}
+
 // Score every camp group by reward against travel + kill + capture + risk,
 // refuse the bad ones (monolith, clearly lethal, still respawning) and return
 // the spawn tiles of all that remain. Returns an empty board only if no group
@@ -602,6 +753,37 @@ cambc::bitboard Bot::choose_camp_goals() {
 // Attack a camp already in range, otherwise approach the best-scoring camp group.
 // When being shot from out of range, close in on the visible camp instead.
 void Bot::farm_camps(bool engage_shooter, bool did_move_in, bool& attack_spent_out) {
+    auto& me = cambc::self();
+
+    // Rally + engage: a hurt champion that is alone should not keep solo-farming.
+    // Walk to the nearest living ally so the team regroups and can fight together;
+    // after a short wait the solo farm is allowed again so nobody stalls.
+    if (!engage_shooter && me.health() < me.max_health() * 0.6f && rally_wait < 10) {
+        int best_d = 1 << 30;
+        cambc::vec2 best_p{};
+        for (const auto& ally : cambc::vision::champions(team::ally)) {
+            if (is_self(ally)) continue;
+            bool ok = false;
+            int d = 0;
+            cambc::vec2 p{};
+            safely([&] {
+                ok = ally.is_visible() && ally.health() > 0;
+                if (ok) { p = ally.position(); d = distance(me.position(), p); }
+                return ok;
+            }, "rally_ally");
+            if (ok && d < best_d) { best_d = d; best_p = p; }
+        }
+        if (best_d > 6 && best_d < (1 << 30)) {
+            ++rally_wait;
+            cambc::bitboard around;
+            around.clear();
+            around |= tiles_around(best_p, 2);
+            move_towards_closest(around);
+            return;
+        }
+    }
+    rally_wait = 0;
+
     // Try casting before moving; if we have not moved, we can cast exclusive abilities
     cast_offensive_ability(did_move_in);
 
@@ -612,7 +794,7 @@ void Bot::farm_camps(bool engage_shooter, bool did_move_in, bool& attack_spent_o
     goals.clear();
 
     if (engage_shooter) {
-        const int range = cambc::self().attack_range();
+        const int range = me.attack_range();
         for (const auto& camp : cambc::vision::camps()) {
             bool usable = false;
             safely([&]{ usable = camp.is_visible() && camp.health() > 0; return usable; }, "camp_goal");
@@ -862,12 +1044,6 @@ void Bot::play_turn() {
         std::cout << "draft: " << draftstr << '\n';
     }
 
-    // Read before writing: little-endian u32 at shared-memory byte offset zero.
-    std::uint32_t round = 0;
-    cambc::shared_memory.read(0, std::span{&round, 1});
-    round = cambc::round_number();
-    cambc::shared_memory.write(0, std::span{&round, 1});
-
     auto& me = cambc::self();
 
     // Telemetry: the lowest-id living ally emits the throttled TEAM summary.
@@ -890,6 +1066,10 @@ void Bot::play_turn() {
     // Leave channels running and skip turns where we cannot act.
     if (!me.is_alive())
         return;
+
+    // Coordinate the team through shared memory before deciding anything.
+    safely([&] { refresh_team_plan(is_designated); return true; }, "team_plan");
+
     if (me.is_recalling() || me.is_submitting_gems() || me.is_teleporting() || (!me.can_move() && !me.can_attack()))
         return;
 

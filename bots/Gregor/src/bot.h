@@ -46,12 +46,25 @@ class Bot {
     };
     std::array<GroupMemory, 64> group_mem{};
 
+    // ---- Team plan (Prompt 4), mirrored from the 8-byte shared memory. The
+    // lowest-id living ally is the coordinator and writes it; everyone reads it
+    // and converges on the same target. Layout is documented atop bot.cpp. ----
+    int plan_target = -1;    // camp-group index, -1 for none
+    int plan_phase = 0;      // 0 idle, 1 gather, 2 engage, 3 capture
+    int plan_travel = 0;     // rounds the team needs to reach the target
+    int plan_set_round = 0;  // round the target was chosen (low byte)
+    int plan_capturer = -1;  // champion id that should claim the reward
+    int rally_wait = 0;      // rounds spent regrouping before a solo fight is allowed
+
     // Telemetry: emit TEAM and per-champion event lines. No gameplay effect.
     void log_telemetry(bool is_designated);
     // Spend on power shards of the chosen stat, keeping some health for survival.
     void buy_items();
     // Refresh last-seen lifecycle state for every camp group currently in vision.
     void update_group_memory();
+    // Coordinate the team plan through shared memory. The coordinator picks the
+    // focus target and its phase; every champion reads the plan back.
+    void refresh_team_plan(bool is_designated);
     // Score every camp group by reward against kill time and risk, refuse the
     // bad ones (monolith, clearly lethal, respawning) and return the spawn tiles
     // of all that remain.
