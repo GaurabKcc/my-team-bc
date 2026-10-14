@@ -916,3 +916,31 @@ challenger folder was removed rather than let a losing variant linger.
 Decision: REVERTED. Baseline stands. Next in the research queue if we revisit:
 conditional scoring (score only as Team A and/or only on large maps), tested
 with the same mirrored harness.
+
+
+## 2026-10-15 — sector assignment lands (from the #1-vs-#2 video)
+
+The video showed both top teams holding ~one champion per map sector all game.
+Implemented draft-time sector assignment: groups ordered richest-first,
+one per pick slot into a versioned binary tail (DPLN magic, v1, 4-byte
+entries), pick submitted BEFORE the memory write so a write failure can never
+cost the pick, text fallback preserved. Match side reads its slot (Cassi and
+Issac share their pick's slot) and farms its sector first with
+nearest-farmable fallback.
+
+Also in this build from the working tree: draft role-coverage gate (2+2
+bodies where team size allows, exact-feasibility check), Cassi & Issac
+mirror-avoidance, exception guards, Willow self-heal fix. Deliberately NOT in
+this build: wave banking (still banks on any gems), enemy-first targeting
+(still camps-first), Monster shards (still Power), wards, dash, help, tether,
+carrier preference, packs (tail carries the byte, unused), value scoring.
+
+- 8W-1L over 9 maps, ONE total death, drafts deterministic, zero errors.
+- Monolith loss verified pre-existing (clean HEAD loses it too).
+- PvP spot-check vs hist-surv: 1-1. Sectors spread us out; they do not fix
+  losing fights.
+- Known dead weight: an unused my_pack member in bot.h (v2-reader edit that
+  never landed). Harmless, listed here so nobody "finishes" it without a test.
+- Decision: KEEP. Next candidates in order: carrier-priority brawl (video
+  evidence: winner's score jumps where its kills land), then wards (ladder
+  CSVs show opponents holding 2-6 to our 0).

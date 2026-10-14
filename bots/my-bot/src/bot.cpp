@@ -4,6 +4,7 @@
 #include <array>
 #include <iostream>
 #include "random.h"
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -184,7 +185,83 @@ bool under_threat() {
     return false;
 }
 
-void farm_camps(bool engage_shooter) {
+// A group is worth walking to unless we can see it respawning. Groups out of
+// vision are assumed alive: walking over is how we find out.
+bool group_farmable(const cambc::map::camp_group& group, const cambc::bitboard& visible) {
+    if ((group.spawn_tiles() & visible).is_empty())
+        return true;
+    try {
+        return !std::holds_alternative<cambc::map::camp_group_respawning>(group.state());
+    } catch (...) {
+        return true;
+    }
+}
+
+} // namespace
+
+// Read the draft's opening plan tail and find this champion's camp group.
+// Tail layout after the text plan and its NUL: magic "DPLN", version u8,
+// count u8, then (champion id, group, pack, flags) per pick in pick order.
+// Anything malformed falls back to no assignment (nearest-first farming).
+bool Bot::read_assignment() {
+    if (assignment_read)
+        return my_group >= 0;
+    assignment_read = true;
+    my_group = -1;
+
+    const auto& mem = cambc::draft_memory;
+    std::size_t off = 0;
+    while (off < mem.size() && mem[off] != std::byte{0})
+        ++off;
+    if (off + 6 >= mem.size())
+        return false;
+    if (mem[off + 1] != std::byte{'D'} || mem[off + 2] != std::byte{'P'}
+        || mem[off + 3] != std::byte{'L'} || mem[off + 4] != std::byte{'N'})
+        return false;
+    if (mem[off + 5] != std::byte{1})
+        return false;
+    const int count = std::to_integer<int>(mem[off + 6]);
+    const std::size_t base = off + 7;
+    if (count <= 0 || base + 4 * static_cast<std::size_t>(count) > mem.size())
+        return false;
+
+    // champion_type -> champion_draft. Cassi and Issac are two bodies for one
+    // pick and both claim that pick's group.
+    const auto name = cambc::self().champion_name();
+    const int raw = static_cast<int>(name);
+    int want;
+    if (raw <= 2)
+        want = raw;
+    else if (raw == 3 || raw == 4)
+        want = static_cast<int>(cambc::champion_draft::cassi_and_issac);
+    else
+        want = raw - 1;
+
+    for (int i = 0; i < count; ++i) {
+        if (std::to_integer<int>(mem[base + 4 * i]) == want) {
+            my_group = std::to_integer<int>(mem[base + 4 * i + 1]);
+            return true;
+        }
+    }
+    return false;
+}
+
+cambc::bitboard Bot::assigned_target() {
+    if (my_group < 0)
+        return cambc::bitboard{};
+    const auto visible = cambc::vision::visible_tiles();
+    int seen = 0;
+    for (const auto& group : cambc::map::camp_groups()) {
+        if (seen++ != my_group)
+            continue;
+        if (!group_farmable(group, visible))
+            break;
+        return group.spawn_tiles();
+    }
+    return cambc::bitboard{};
+}
+
+void Bot::farm_camps(bool engage_shooter) {
     cast_offensive_ability();
 
     if (attack_camps())
@@ -201,12 +278,28 @@ void farm_camps(bool engage_shooter) {
     }
 
     if (goals.is_empty()) {
-        const auto visible = cambc::vision::visible_tiles();
-        for (const auto& group : cambc::map::camp_groups()) {
-            const bool group_visible = !(group.spawn_tiles() & visible).is_empty();
-            if (group_visible && std::holds_alternative<cambc::map::camp_group_respawning>(group.state()))
-                continue;
-            goals |= group.spawn_tiles();
+        // Own sector first, so teammates spread out instead of converging on
+        // the same camp. Falls back to every farmable group when ours is
+        // dead, respawning, or unreachable.
+        if (read_assignment()) {
+            goals = assigned_target();
+            if (goals.is_empty()) {
+                const auto visible = cambc::vision::visible_tiles();
+                for (const auto& group : cambc::map::camp_groups()) {
+                    const bool group_visible = !(group.spawn_tiles() & visible).is_empty();
+                    if (group_visible && std::holds_alternative<cambc::map::camp_group_respawning>(group.state()))
+                        continue;
+                    goals |= group.spawn_tiles();
+                }
+            }
+        } else {
+            const auto visible = cambc::vision::visible_tiles();
+            for (const auto& group : cambc::map::camp_groups()) {
+                const bool group_visible = !(group.spawn_tiles() & visible).is_empty();
+                if (group_visible && std::holds_alternative<cambc::map::camp_group_respawning>(group.state()))
+                    continue;
+                goals |= group.spawn_tiles();
+            }
         }
     }
 
@@ -215,8 +308,6 @@ void farm_camps(bool engage_shooter) {
     if (move_towards_closest(goals))
         attack_camps();
 }
-
-} // namespace
 
 void Bot::play_turn() {
     // Initialise build: power shards of strength scale our basic attacks.
