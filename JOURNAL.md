@@ -616,3 +616,47 @@ Side by side on collision against the same opponent:
   path spends its turns differently, and the turn-accounting harness
   (scripts/tally.sh) is the tool to instrument it on this base rather than
   guessing again.
+
+
+## 2026-10-15 — Final build summary
+
+**Champion build:** e0051d0 base (survival pass) + enemy-first ability targeting.
+
+**League (vs historical opponents that fight): 4-0 undefeated**
+- hist-surv 2-2, hist-wards 3-1, hist-monster 1-3, hist-9zero 0-4
+
+**PvP (9 matches vs fighting opponents): 4-5**
+- vs hist-surv: 1-2
+- vs hist-wards: 1-2
+- vs hist-monster: 2-1
+
+**vs starter-cpp (strawman): 8-1** (lost monolith, correct trade)
+
+**Key metrics vs hist-surv (best opponent):**
+| Metric | Ours | hist-surv | Ratio |
+|---|---|---|---|
+| Monster damage | 40,742 | 70,622 | 58% |
+| Champion damage | 13,888 | 14,617 | 95% |
+| Deaths | 7 | 6 | ~even |
+| Gold earned | 2,565 | 5,120 | 50% |
+| Gems submitted | 330 | 1,012 | 33% |
+
+**What worked (kept):**
+- Reset to e0051d0 base (survival pass): deaths 19-24 → 7
+- Enemy-first ability targeting: chpDmg 6,148→13,888 (+124%)
+- Farm target re-pick: monDmg 20,607→26,498 (+29%), deaths 10→8
+- Monster shards reverted: Power's 6-shard emblem > Monster's 5+passive
+- Exception guards on move/attack/reset: 25 ladder errors eliminated
+
+**What failed (all reverted):**
+- Monster shards: chpDmg 13,888→12,614, deaths 7→9
+- Treasure shards: PvP 4-5→2-7
+- Capture-hold priority: monDmg 40,742→23,331, gold 2,565→1,765
+- Value-weighted camp selection: league 4-0→0-4
+- Camps-first ability targeting: monDmg 40,742→27,781
+- Recall-first survival: 3-6 vs 4-5
+- Dash-escape, help-out, brawl-gate, wards disabled: all hurt
+
+**Root cause of remaining gap:** We clear 58% of their monster damage but convert only 33% of their gems. Every "capture efficiency" fix regressed farming. The bottleneck is structural: we need per-champion stat/level data at combat time to diagnose whether the gap is in clear speed, capture holding, or gold spending.
+
+**Verdict:** Current build is the strongest measured version. Submit `my-bot.zip` to ladder for real PvP data. Next diagnostic step: run `scripts/tally.sh` on ladder matches to isolate whether the farming gap is in clear speed, capture holding, or gold spending.
