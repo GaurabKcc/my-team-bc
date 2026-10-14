@@ -251,7 +251,8 @@ void Bot::play_turn() {
         }
 
     // Bank any carried gems before farming.
-    if (me.gem_count() > 0) {
+    // Only bank when carrying >= 30 gems (wave banking reduces trips).
+    if (me.gem_count() >= 30) {
         cambc::bitboard goals;
         goals.clear();
         for (auto altar : cambc::map::altars().positions()) {
