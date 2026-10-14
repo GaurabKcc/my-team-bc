@@ -836,3 +836,30 @@ START fights, while farming and banking continue. No forced movement, no
 turn hijack, no orbit trap. Corners holds at 1002 with 0 deaths.
 Round-robin 8W-1L (monolith pre-existing), mirrored league 3-5 (one match
 off the 4-4 baseline; the gate costs some fight participation by design).
+
+
+## 2026-10-15 — user asked if hist-surv is the best; verified yes, promoted it
+
+The mirrored league read hist-surv 7-1 against our 3-5, and head-to-head both
+orders confirmed it beats us beyond side bias. So the "current build" was
+shelved and hist-surv (e0051d0) was rebuilt with two surgical additions and
+promoted to my-bot:
+
+1. Exception guards on move_towards_closest, attack_if_in_range,
+   use_attack_reset (the 25 wasted turns from the ladder logs).
+2. Willow self-heal fix: skip our own tile in the ally-heal loop (the ~350
+   error-30s per game; the heal could never land and the turn died trying).
+
+Parity check, champ-test vs hist-surv: 1-1 with both games side-decided
+(220-1040 as A, 1040-220 as B, identical tapes). The guards change no
+decisions, only stop turn-waste.
+
+Promoted build, mirrored league: my-bot 6-2, tied best with hist-surv 6-2.
+
+Composition audit of what actually shipped (read, not assumed): camps-first
+abilities, Power shards, banks on any gems>0, no wave banking, no sectors, no
+wards, no dash, no help, no tether, no carrier preference, no farm/bank
+commitment. Every one of those was either measured-negative or never
+validated in isolation on this base. They are re-test candidates, not
+defaults. Enemy-first targeting (+56% champion damage on the old base) tops
+that list.
