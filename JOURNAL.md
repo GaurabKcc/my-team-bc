@@ -975,3 +975,24 @@ Implications:
 2. All historical draft comparisons are confounded by order. Any two runs
    whose pick orders differ are not directly comparable on score alone.
 3. Sectors are back on (the disable was diagnostic only).
+
+
+## 2026-10-15 — "farm beats aggression": tested literally, refuted literally
+
+User hypothesis: farming beats aggression, so stop fighting and farm. Tested
+as kills-only brawling (attack solely enemies finishable this turn).
+
+- vs hist-surv as A: 154-1012 loss, 9 deaths (baseline loses this fixture too,
+  but competitive).
+- vs hist-surv as B: 594-1012 loss, 15 deaths.
+Both orders lost badly; deaths exploded because refusing to hit back lets
+enemies beat on us for free.
+
+Reverted same session; tree is byte-clean vs HEAD.
+
+The refined reading, which the data supports: farm-first does NOT mean
+never fight. It means never SEEK fights while always answering them - which
+is exactly what the baseline already does (plain in-range brawl, no chase
+logic anywhere, help-out removed). hist-surv, the best measured bot, does
+the same: it fights 17-24 turns a game, never hunts. "Don't hunt" is the
+validated principle; "don't fight back" is its strawman, now refuted.
