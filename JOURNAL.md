@@ -593,3 +593,26 @@ Side by side on collision against the same opponent:
   farm logic unions every non-respawning group and takes the closest tile,
   with no value weighting and no heavy-camp filter, and that is the obvious
   remaining difference to measure.
+
+
+### Camp selection: value-weighting REFUTED on the new base
+- Tested replacing the base's "union every non-respawning group, walk to the
+  closest tile" with value weighting (reward per tile travelled, pick one
+  group). League collapsed 4-0 -> 0-4. Travel dominates and the simplest
+  possible routing wins, which confirms the very first experiment from this
+  project, now on the correct harness rather than against starter-cpp.
+- Also tested the theory that enemy-first targeting costs farming damage by
+  casting at champions instead of monsters. Refuted: camps-first is worse on
+  every axis - monster damage 40,742 -> 27,781, deaths 7 -> 9, gold 2,565 ->
+  1,870. Enemy-first helps farming as well as fighting.
+- Final champion build: e0051d0 base plus enemy-first ability targeting.
+  League 4-0, PvP 4-5.
+- STILL UNEXPLAINED, and now well isolated: identical champions, map and
+  draft, yet we do ~40k monster damage and bank ~330 gems against ~70k and
+  ~1012. Capture count follows from damage at roughly 12 captures against 33.
+  Every lever tried (items, target commitment, capture holding, ability
+  priority, camp selection, shard split, survival thresholds) either did
+  nothing or hurt. The remaining untested difference is that the e0051d0 farm
+  path spends its turns differently, and the turn-accounting harness
+  (scripts/tally.sh) is the tool to instrument it on this base rather than
+  guessing again.
