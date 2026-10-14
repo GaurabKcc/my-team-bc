@@ -881,3 +881,38 @@ and the Willow self-heal fix that the ladder logs proved necessary (25
 wasted turns and ~350 error-30s per submission, respectively). Nothing in
 my-bot plays worse; the guards only convert would-be-wasted turns into live
 ones. Bundled as my-bot.zip (5596 bytes, SHA256-verified against source).
+
+
+## 2026-10-15 — Phase 1 refuted: value/time camp scoring loses to union
+
+Built a challenger bot (separate folder, baseline frozen) that scores every
+farmable group as value/(1+cost) with value=gems+gold/8 and cost=travel+
+kill-turns+bank-trip, committing to the winner until it clears. Two implementation
+bugs caught and fixed along the way, both worth recording:
+
+1. Dangling pointer: stored `const camp_group*` into the vector returned BY
+   VALUE from `map::camp_groups()`. Same bug class as the earlier `weakest`
+   incident (the 1444-crash one). Copy the tiles out, never the pointer.
+2. Fuel blowup: scoring every turn for every champion suspended turns (bot
+   went silent, couldn't retreat/recall, died). Fixed by committing to the
+   target and scoring once per camp cleared - but note the irony below.
+
+Domination test, challenger vs baseline, mirrored both orders, 3 maps:
+
+  collision: baseline wins both (1004-220, 1004-446)
+  expanse:   baseline wins as B (1016-964); challenger wins as B (1014-640)
+  rows:      baseline wins both (1012-990, 1023-990)
+
+Baseline takes it 4-2. Diagnostics along the way: radius cap (no change),
+no-commitment variant (catastrophic 0 gems - commitment was load-bearing),
+contest-danger term (worse again).
+
+The one real finding: on expanse as Team A, scoring put up 964 against the
+baseline's 640 as A (+324). Everywhere else it lost or tied. Hypothesis for
+the outlier: as first mover, racing to the best camp beats reacting locally;
+as second mover, union-and-react wins. Untested - single data point, and the
+challenger folder was removed rather than let a losing variant linger.
+
+Decision: REVERTED. Baseline stands. Next in the research queue if we revisit:
+conditional scoring (score only as Team A and/or only on large maps), tested
+with the same mirrored harness.
