@@ -271,6 +271,13 @@ void Bot::update_signal() {
 }
 
 // Should this champion break off to defend a team-mate in trouble?
+// Never chase a team-mate's fight. The main objective is farming and
+    // banking; fighting should be a consequence of defending your own camp,
+// not something we go looking for. Enabling this restored farming from 0% of
+    // turns to about 50%, because the help response was pulling champions off
+    // their camps and into skirmishes, and every skirmish cascaded into
+    // fleeing and recalling. We still publish danger pings - awareness is
+    // free - we just do not go and join them.
 bool Bot::should_help() {
     auto& me = cambc::self();
     const auto sig = read_signal();
@@ -284,6 +291,8 @@ bool Bot::should_help() {
         return false;
     if (!cambc::vision::camps().empty())
         return false;
+
+    return false;
 
     const vec2 mate{sig.x, sig.y};
     if (distance(me.position(), mate) > 6)
