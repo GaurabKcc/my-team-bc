@@ -574,3 +574,22 @@ Side by side on collision against the same opponent:
   40,742 against 70,622 and gold 2,565 against 5,120, while we clear 58% as
   much damage but bank only 33% as many gems. Clearing proportionally better
   than capturing points at capture holding, not at clear speed.
+
+
+### Capture-hold priority on the new base: REFUTED
+- Forcing the champion to stand on a cleared group before starting the next
+  camp cost far more than it returned: monster damage 40,742 -> 23,331, gold
+  2,565 -> 1,765, gems 330 -> 242, and the league fell 4-0 -> 3-1. Holding a
+  capture costs turns, and turns are exactly what we are short of.
+- So "we clear 58% of their damage but bank 33% of their gems" is not explained
+  by failing to stand on cleared regions. We simply clear far less, and the
+  capture ratio is a second-order effect of that.
+- Current champion build: e0051d0 base plus enemy-first ability targeting.
+  League 4-0, PvP 4-5, and every damage metric ahead of the old build.
+- OPEN: the single unexplained gap is monster damage 40,742 against 70,622 on
+  identical champions, map and draft. Items are ruled out (Power beats every
+  passive family on emblem maths). Capture holding is ruled out. What has NOT
+  been compared is how the two bots choose which camp to walk to - the e0051d0
+  farm logic unions every non-respawning group and takes the closest tile,
+  with no value weighting and no heavy-camp filter, and that is the obvious
+  remaining difference to measure.
