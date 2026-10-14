@@ -554,3 +554,23 @@ Side by side on collision against the same opponent:
 - The one remaining gap is now purely farming throughput: monster damage
   40,742 against 70,622, and gold 2,565 against 5,120. Damage exchange in
   fights is now roughly even, so everything left is clearing camps faster.
+
+
+### Item families re-tested on the e0051d0 base: POWER WINS
+- The reset base buys Power shards, whose passive is "None; one extra shard's
+  worth instead". The old build had moved to Monster and I had recorded that
+  as a clear win - but that was measured against starter-cpp.
+- On the real harness, Monster is worse: monster damage 40,742 -> 38,172,
+  champion damage 13,888 -> 12,614, deaths 7 -> 9, gold 2,565 -> 2,225.
+  Treasure is worse still: PvP 4-5 -> 2-7.
+- The mechanism is the emblem maths. Power's emblem counts as 6 shards of the
+  chosen stat; Monster, Treasure and the rest count as 5. So every passive
+  family is 20% weaker in raw stats, and the passive has to out-earn that. On
+  this base neither +10% camp damage nor +20% gold does. Raw stats win
+  because dying costs more than clearing slowly.
+- This reverses an earlier "RIGHT" verdict that was recorded against the
+  strawman opponent. Verified against fighters, Power is correct.
+- OPEN: the remaining gap is purely farming throughput, monster damage
+  40,742 against 70,622 and gold 2,565 against 5,120, while we clear 58% as
+  much damage but bank only 33% as many gems. Clearing proportionally better
+  than capturing points at capture holding, not at clear speed.
