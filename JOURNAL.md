@@ -541,3 +541,16 @@ Side by side on collision against the same opponent:
 - The finding that motivated the reset still stands: the old build farmed 0% of
   turns against this one's 53-80%, and the old build died 7-10 times per game
   against this one's 0.
+
+
+### Re-applying enemy-first ability targeting on the new base: KEPT
+- Previously it raised champion damage 56% on the old build. On the e0051d0
+  base the effect is larger: against hist-surv, champion damage dealt 13,888
+  against their 14,617, where the old build managed 2,895-6,148. Monster
+  damage 40,742 (old build 15,086-28,791). Deaths 7 against their 6, where
+  the old build died 8-10 against their 0-2.
+- League stays 4-0, PvP 4-5 (unchanged in wins), but every damage metric
+  moves a long way. Kept on the metrics.
+- The one remaining gap is now purely farming throughput: monster damage
+  40,742 against 70,622, and gold 2,565 against 5,120. Damage exchange in
+  fights is now roughly even, so everything left is clearing camps faster.

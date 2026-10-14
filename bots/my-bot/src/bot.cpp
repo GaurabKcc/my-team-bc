@@ -83,15 +83,15 @@ bool cast_offensive_ability() {
         if (!ability.is_ready()) continue;
         if (!ability.is_damage() && !ability.is_aoe_damage() && !ability.is_cc()) continue;
         if (ability.can_target_camps() || ability.can_target_enemies()) {
-            if (ability.can_target_camps())
-                for (const auto& target : cambc::vision::camps())
-                    if (target.health() > 0 && ability.valid_tiles().is_set(target.position())
-                        && ability.use(target))
-                        return true;
             if (ability.can_target_enemies())
                 for (const auto& target : cambc::vision::champions(team::enemy))
                     if (target.is_visible() && target.health() > 0
                         && ability.valid_tiles().is_set(target.position()) && ability.use(target))
+                        return true;
+            if (ability.can_target_camps())
+                for (const auto& target : cambc::vision::camps())
+                    if (target.health() > 0 && ability.valid_tiles().is_set(target.position())
+                        && ability.use(target))
                         return true;
         }
         if (ability.can_target_ground()) {
