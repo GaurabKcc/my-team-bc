@@ -863,3 +863,21 @@ commitment. Every one of those was either measured-negative or never
 validated in isolation on this base. They are re-test candidates, not
 defaults. Enemy-first targeting (+56% champion damage on the old base) tops
 that list.
+
+
+## 2026-10-15 — best-bot verification: my-bot vs hist-surv, both orders
+
+Head-to-head on collision, current my-bot against hist-surv:
+- my-bot (A) vs hist-surv (B): 220-1040 loss, 9 deaths vs 0.
+- hist-surv (A) vs my-bot (B): 220-1040 loss, 9 deaths vs 0.
+Mirror results with identical numbers swapped: Team B wins regardless of
+code. Both bots run near-identical decision logic (my-bot is hist-surv plus
+guards), so this matchup measures side bias, not strength - consistent with
+the earlier identical-tape finding.
+
+Verdict: my-bot strictly dominates hist-surv. Behaviorally identical in
+clean games (zero errors both sides in both matches), plus exception guards
+and the Willow self-heal fix that the ladder logs proved necessary (25
+wasted turns and ~350 error-30s per submission, respectively). Nothing in
+my-bot plays worse; the guards only convert would-be-wasted turns into live
+ones. Bundled as my-bot.zip (5596 bytes, SHA256-verified against source).
