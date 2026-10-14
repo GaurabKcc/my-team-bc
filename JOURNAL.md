@@ -500,7 +500,16 @@ fights, not at farming. Four candidate causes, each toggled and re-measured:
   4-5 -> 5-4, still 9-0 vs starter-cpp. Committed. Mixed signal recorded: the
   single-map league read 2-2 where it read 3-1, a one-match difference, so no
   league improvement is claimed.
-- OPEN: champion damage still trails damage taken (5,360 vs 13,504). Every
-  "fight less" change has now been refuted, so remaining ideas are about
-  winning fights outright - focus-fire re-targeting after a teammate joins,
-  and stun on the enemy gem carrier rather than on whoever is nearest.
+- Focus fire (prefer an enemy a friend is already in range of, so damage
+  converges instead of splitting three ways): 3-6, worse than 5-4. Refuted.
+- Stun the carrier (prefer the enemy holding the most gems, since a kill
+  donates their whole bag plus 50 gold): 2-7, clearly worse. Refuted.
+- PvP is now 5-4, the best measured, and every remaining "fight better" idea
+  tried has been refuted too.
+- OPEN, and the honest summary: champion damage 5,360 against 13,504 taken.
+  Six different hypotheses have now failed - fight less, flee more, ward,
+  help, focus fire, stun the carrier. The remaining explanations are not in
+  the decision layer: either our champions are simply lower-geared than the
+  opponent's at the moment contact happens, or the map/draft matchup favours
+  them. Both need per-champion stat and level data from a live match, which
+  the statistics export does not expose.
