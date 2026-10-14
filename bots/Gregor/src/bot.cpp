@@ -23,10 +23,24 @@ bool is_self(const cambc::champion& other) {
 // Run an engine action; a rejected action (e.g. an illegal cast or a race with a
 // teammate) must not abort the rest of the turn, so report failure instead.
 template <class F>
-bool safely(F&& action) {
+bool safely(F&& action, const char* action_name = nullptr) {
     try {
         return action();
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+        try {
+            std::cout << "r=" << cambc::round_number() << " cid=" << static_cast<std::uint32_t>(static_cast<cambc::handle_champion_t>(cambc::self()))
+                      << " action=" << (action_name ? action_name : "unknown")
+                      << " err=" << e.what() << '\n';
+        } catch (...) {
+        }
+        return false;
+    } catch (...) {
+        try {
+            std::cout << "r=" << cambc::round_number() << " cid=" << static_cast<std::uint32_t>(static_cast<cambc::handle_champion_t>(cambc::self()))
+                      << " action=" << (action_name ? action_name : "unknown")
+                      << " err=unknown\n";
+        } catch (...) {
+        }
         return false;
     }
 }
@@ -148,10 +162,13 @@ bool cast_offensive_ability(bool did_move) {
         if (!ability.is_damage() && !ability.is_aoe_damage() && !ability.is_cc()) continue;
         const auto in_range = [&](vec2 tile) { return ability.valid_tiles().is_set(tile); };
         if (ability.can_target_camps())
-            for (const auto& target : cambc::vision::camps())
-                if (target.health() > 0 && target.is_visible() && in_range(target.position())
-                    && safely([&] { return ability.use(target); }))
+            for (const auto& target : cambc::vision::camps()) {
+                bool usable = false;
+                safely([&]{ usable = target.is_visible() && target.health() > 0; return usable; }, "camp_target");
+                if (usable && in_range(target.position())
+                    && safely([&] { return ability.use(target); }, "ability_use"))
                     return true;
+            }
         if (ability.can_target_enemies())
             for (const auto& target : cambc::vision::champions(team::enemy))
                 if (target.is_visible() && target.health() > 0
@@ -160,10 +177,13 @@ bool cast_offensive_ability(bool did_move) {
                     return true;
         // Ground-targeted area effects land on one tile and splash its neighbours.
         if (ability.can_target_ground()) {
-            for (const auto& target : cambc::vision::camps())
-                if (target.health() > 0 && target.is_visible() && in_range(target.position())
-                    && safely([&] { return ability.use(target.position()); }))
+            for (const auto& target : cambc::vision::camps()) {
+                bool usable = false;
+                safely([&]{ usable = target.is_visible() && target.health() > 0; return usable; }, "camp_target_ground");
+                if (usable && in_range(target.position())
+                    && safely([&] { return ability.use(target.position()); }, "ability_use_ground"))
                     return true;
+            }
             for (const auto& target : cambc::vision::champions(team::enemy))
                 if (target.is_visible() && target.health() > 0
                     && in_range(target.position())
@@ -200,13 +220,19 @@ bool cast_defensive_ability(bool did_move = false) {
 
 // Swing at a camp and cash in an attack-reset for a second swing the same turn.
 bool attack_camps(bool attack_spent, bool& attack_spent_out) {
-    for (const auto& camp : cambc::vision::camps())
-        if (camp.health() > 0 && camp.is_visible() && attack_if_in_range(camp, &attack_spent_out)) {
+    for (const auto& camp : cambc::vision::camps()) {
+        bool usable = false;
+        safely([&]{ usable = camp.is_visible() && camp.health() > 0; return usable; }, "camp_usable");
+        if (usable && attack_if_in_range(camp, &attack_spent_out)) {
             if (use_attack_reset(attack_spent_out))
-                for (const auto& camp2 : cambc::vision::camps())
-                    if (camp2.health() > 0 && camp2.is_visible() && attack_if_in_range(camp2, &attack_spent_out)) break;
+                for (const auto& camp2 : cambc::vision::camps()) {
+                    bool usable2 = false;
+                    safely([&]{ usable2 = camp2.is_visible() && camp2.health() > 0; return usable2; }, "camp2_usable");
+                    if (usable2 && attack_if_in_range(camp2, &attack_spent_out)) break;
+                }
             return true;
         }
+    }
     return false;
 }
 
@@ -224,9 +250,11 @@ void farm_camps(bool engage_shooter, bool did_move_in, bool& attack_spent_out) {
 
     if (engage_shooter) {
         const int range = cambc::self().attack_range();
-        for (const auto& camp : cambc::vision::camps())
-            if (camp.health() > 0 && camp.is_visible())
-                goals |= tiles_around(camp.position(), range);
+        for (const auto& camp : cambc::vision::camps()) {
+            bool usable = false;
+            safely([&]{ usable = camp.is_visible() && camp.health() > 0; return usable; }, "camp_goal");
+            if (usable) goals |= tiles_around(camp.position(), range);
+        }
     }
 
     if (goals.is_empty()) {
@@ -320,14 +348,17 @@ void Bot::play_turn() {
     did_attack = false;
     attack_spent = false;
     did_move = false;
-    for (const auto& enemy : cambc::vision::champions(team::enemy))
-        if (enemy.is_visible() && attack_if_in_range(enemy, &attack_spent)) {
+    for (const auto& enemy : cambc::vision::champions(team::enemy)) {
+        bool usable = false;
+        safely([&]{ usable = enemy.is_visible() && enemy.health() > 0; return usable; }, "enemy_brawl");
+        if (usable && attack_if_in_range(enemy, &attack_spent)) {
             did_attack = true;
             if (use_attack_reset(attack_spent))
                 for (const auto& again : cambc::vision::champions(team::enemy))
-                    if (again.is_visible() && attack_if_in_range(again, &attack_spent)) break;
+                    { bool usable2=false; safely([&]{usable2=again.is_visible()&&again.health()>0; return usable2;},"enemy_brawl2"); if(usable2&&attack_if_in_range(again,&attack_spent)) break; }
             return;
         }
+    }
 
     // Bank any carried gems before farming.
     if (me.gem_count() > 0) {
