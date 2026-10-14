@@ -213,6 +213,48 @@ void Bot::play_turn() {
         || (!me.can_move() && !me.can_attack()))
         return;
 
+    // Opening-speed timing: gold only arrives via captures, so first gold is
+    // first capture. Emblem check runs every 25 rounds to keep it cheap.
+    if (first_gold_round == 0 && me.gold_count() > 0)
+        first_gold_round = cambc::round_number();
+    if (first_emblem_round == 0 && cambc::round_number() % 25 == 0) {
+        const auto inv = me.item_count();
+        static const cambc::item_type kEmblems[] = {
+            cambc::item_type::monster_emblem_of_strength,
+            cambc::item_type::monster_emblem_of_focus,
+            cambc::item_type::monster_emblem_of_health,
+            cambc::item_type::power_emblem_of_strength,
+            cambc::item_type::power_emblem_of_focus,
+            cambc::item_type::power_emblem_of_health,
+            cambc::item_type::durability_emblem_of_strength,
+            cambc::item_type::durability_emblem_of_focus,
+            cambc::item_type::durability_emblem_of_health,
+            cambc::item_type::treasure_emblem_of_strength,
+            cambc::item_type::treasure_emblem_of_focus,
+            cambc::item_type::treasure_emblem_of_health,
+            cambc::item_type::jungle_emblem_of_strength,
+            cambc::item_type::jungle_emblem_of_focus,
+            cambc::item_type::jungle_emblem_of_health,
+            cambc::item_type::home_emblem_of_strength,
+            cambc::item_type::home_emblem_of_focus,
+            cambc::item_type::home_emblem_of_health,
+            cambc::item_type::bruiser_emblem_of_strength,
+            cambc::item_type::bruiser_emblem_of_focus,
+            cambc::item_type::bruiser_emblem_of_health,
+        };
+        for (auto e : kEmblems) {
+            if (inv[e] > 0) {
+                first_emblem_round = cambc::round_number();
+                break;
+            }
+        }
+    }
+    if (first_emblem_round != 0 && !early_reported) {
+        early_reported = true;
+        std::cout << "EARLY gold=" << first_gold_round
+                  << " emblem=" << first_emblem_round << '\n';
+    }
+
     const bool at_spawn = cambc::map::spawn_region(team::ally).is_set(me.position());
     if (at_spawn) {
         auto& me2 = cambc::self();

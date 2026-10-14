@@ -716,3 +716,27 @@ conversion. The gap is structural: we clear camps slower, so we trigger fewer ca
 
 **Next step if continuing:** submit current `my-bot.zip` to ladder for real opponent data.
 The `scripts/tally.sh` harness is ready to diagnose the capture-efficiency gap on real opponents.
+
+
+## 2026-10-15 — opening-speed instrumentation (first gold / first emblem)
+
+The remaining gap (monster damage 40,742 vs 70,622 on identical builds) was
+never going to be found by more end-of-game stats, so each champion now
+reports two numbers once per game into the replay stdout: the first round it
+holds any gold (proxy for first capture, since gold only arrives that way)
+and the first round it owns any emblem (21 emblem types checked every 25
+rounds, negligible cost).
+
+Baseline from one collision game (my-bot 1012-110 W, r611, 0 deaths):
+
+  champion: first gold r33 / r18 / r22 / r149, first emblem r125 / r125 / r200 / r375
+
+Three champions capture inside 35 rounds and emblem by 200. The fourth takes
+until round 149 for its first gold and 375 for its emblem - a straggler that
+is stuck, dead early, or walking a bad route. That single champion accounts
+for a large share of the farming gap on its own.
+
+Next: run this against a fighting opponent (scripts/tally.sh comparison) and
+see whether the straggler pattern holds there, and whether it is the same
+champion role each time. If so the fix is routing for that role, not global
+tuning.
