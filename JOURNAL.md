@@ -1173,3 +1173,61 @@ Batteries: parallel, 18 games each (9 maps x both orders), JOBS=2 each.
   dies = feeds killer 50g + gems, so the bail is the risk control).
 - Combined build (both promotions) validating vs hist-surv (standing
   yardstick: 8-10 with pre-combination build).
+
+## 2026-10-15 — FARM-ONLY doctrine (user mandate): zero combat, fastest to 1000
+
+### P1 exp-pacifist: REFUTED HARD — 5-13 vs fighter (results-p1.csv)
+- Removed brawl block + all enemy-target casts (camp casts kept). Everything
+  else identical to exp-fighter (= HEAD build).
+- Fighter swept collision, interlock, corners, elkring, packs; pacifist
+  swept only expanse. OUR wins were SLOWER too (avg 656 vs 538 rounds).
+- Reading: without evasion, refusing to fight means enemies farm us while we
+  stand there - out-farmed AND killed. P2 (threat-range evasion) is the
+  doctrine's load-bearing wall; champions also need to not die mid-capture.
+- Note: kill-drop gems forgone by doctrine (user: "we dont care about it").
+
+### P2 exp-evade: REFUTED — 3-15 vs fighter (results-p2.csv)
+- Pacifist + threat-range evasion (step to tile farthest from enemies;
+  full-bag-in-tribute-range exempt since tribute is damage-proof).
+- Fighter swept 6 maps; our wins averaged 760 rounds vs 534. Evasion made
+  results WORSE than pure pacifist (5-13): walking away concedes camps,
+  captures and map, and enemies run us down anyway.
+
+### P3' exp-defend (defense-only patch): REFUTED — 4-14 vs fighter (results-defend.csv)
+- Added back exactly one thing: swing at an enemy ALREADY in our attack
+  tiles (no chase, no enemy-target casts, no brawl walks). Still a rout:
+  fighter sweeps 6 maps, wins at 521 vs 736 rounds.
+
+### Doctrine verdict (54 mirrored games total)
+- farm-only (5-13), farm+evade (3-15), farm+evade+defend (4-14): the
+  no-champion-combat doctrine cannot hold the map against the current
+  fighter build. The fighting in v19 is what PROTECTS the farming.
+- v19 (fighter, submitted) stands as the strongest measured build:
+  66-44 across all historical models.
+- ACTION PENDING USER: harvest farming halves (gem-first targeting, farm
+  draft) as additive experiments on the fighter base, or continue doctrine.
+
+### Decision: doctrine harvesting on the fighter base (user: "do the recommended")
+- v19 fighter stands; farming halves re-tested as ONE-variable additions:
+  - exp-gemfirst-f: fighter + gem-cluster-first farm target ranking
+  - exp-farmdraft-f: fighter + farm-doctrine draft scores (economy/camp-DPS)
+  Batteries parallel (18 games each, both orders, 9 maps).
+
+### Doctrine harvest results (18 games each vs exp-fighter)
+- exp-gemfirst-f (gem-cluster-first targets): 4-14 REFUTED. Walking past
+  live wolf/elk groups to distant gem clusters costs more than the safer
+  gems return. Notable: it DID sweep corners (our chronic weak map).
+- exp-farmdraft-f (farm-doctrine draft scores): **11-7 WON** (sweeps:
+  collision, corners, packs; loss: expanse) and wins faster (640 vs 673).
+  PROMOTED into bots/my-bot/src/draft.cpp. Picks now favour economy +
+  camp-DPS + sustain (Varg/Vendetta/Vesper/Tavi/C&I head the board).
+
+### v20 draft promotion: FAILED validation, reverted to v19
+- exp-farmdraft-f beat the fighter mirror 11-7 but the promoted build lost
+  to hist-surv **6-12** (hist-surv sweeps corners, packs, elkring) versus
+  v19's 10-8. Mirror wins don't pay on the ladder; hist-surv does.
+- v19 (already submitted, version 19) remains the strongest validated build:
+  66-44 across all six historical models. my-bot restored to HEAD (= v19).
+- Standing lesson, third data point: our draft scores keep flip-flopping by
+  matchup (hybrid 7-11, old-draft 10-8, farmdraft 6-12 vs hist-surv). Draft
+  changes will only be promoted with a hist-surv PASS from now on.
